@@ -1,0 +1,324 @@
+#pragma once
+
+#include <cstdint>
+#include <type_traits>
+
+#include "driver/spi_master.h"
+#include "driver/gpio.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_err.h"
+#include "esp_log.h"
+
+#include "lvgl.h"
+
+class waveshare_st7789_t
+{
+    static constexpr const char *TAG = "ST7789";
+
+public:
+    enum orientation_t {
+        portrait,
+        landscape,
+    };
+
+    waveshare_st7789_t(spi_host_device_t spi_host,
+                    int cs_gpio,
+                    int dc_gpio,
+                    int rst_gpio,     // -1 if no hardware reset
+                    int bl_gpio,      // -1 if no backlight control
+                    uint32_t width  = 240,
+                    uint32_t height = 320,
+                    int spi_clock_hz = 40 * 1000 * 1000,  // 40 MHz
+                    orientation_t orientation = portrait)
+        : _spi_host(spi_host),
+          _spi_dev(nullptr),
+          _cs_gpio(cs_gpio),
+          _dc_gpio(dc_gpio),
+          _rst_gpio(rst_gpio),
+          _bl_gpio(bl_gpio),
+          _width(width),
+          _height(height),
+          _spi_clock_hz(spi_clock_hz),
+          _orientation(orientation)
+    {
+    }
+
+    inline esp_err_t init()
+    {
+        esp_err_t err;
+
+        err = config_gpio();
+        if (err != ESP_OK) return err;
+
+        err = config_spi_device();
+        if (err != ESP_OK) return err;
+
+        init_waveshare_sequence();
+
+        return ESP_OK;
+    }
+
+    inline void backlight(bool enable)
+    {
+        if (_bl_gpio >= 0) {
+            gpio_set_level((gpio_num_t)_bl_gpio, enable);
+        }
+    }
+
+    inline void flush(lv_display_t *disp, const lv_area_t *area, lv_color16_t *color_p)
+    {
+        LV_UNUSED(disp);
+
+        uint16_t x0 = area->x1;
+        uint16_t y0 = area->y1;
+        uint16_t x1 = area->x2;
+        uint16_t y1 = area->y2;
+
+        set_window(x0, y0, x1, y1);
+
+        int32_t total_pixels = lv_area_get_size(area);
+        int32_t total_bytes  = total_pixels * sizeof(lv_color16_t);
+
+        lv_draw_sw_rgb565_swap(color_p, total_pixels);
+
+        const uint8_t *buf = reinterpret_cast<const uint8_t *>(color_p);
+
+        set_dc(true);
+
+        spi_transaction_t t = {};
+        t.length    = total_bytes * 8;
+        t.tx_buffer = buf;
+
+        esp_err_t err = spi_device_transmit(_spi_dev, &t);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "flush transmit failed: %s", esp_err_to_name(err));
+        }
+
+        lv_display_flush_ready(disp);
+    }
+
+    inline void register_flush_cb(lv_display_t* disp)
+    {
+        lv_display_set_flush_cb(disp, lvgl_flush_cb);
+        lv_display_set_user_data(disp, this);
+    }
+
+    inline uint32_t width()  const { return _width;  }
+    inline uint32_t height() const { return _height; }
+    inline orientation_t orientation() const { return _orientation; }
+
+private:
+    static inline void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, unsigned char *px_map)
+    {
+        auto self = static_cast<waveshare_st7789_t*>(lv_display_get_user_data(disp));
+        if (!self) {
+            lv_display_flush_ready(disp);
+            return;
+        }
+
+        self->flush(disp, area, reinterpret_cast<lv_color16_t*>(px_map));
+    }
+
+    inline void delay_ms(uint32_t ms)
+    {
+        vTaskDelay(pdMS_TO_TICKS(ms));
+    }
+
+    inline esp_err_t config_gpio()
+    {
+        gpio_config_t io_conf = {};
+        io_conf.intr_type = GPIO_INTR_DISABLE;
+        io_conf.mode = GPIO_MODE_OUTPUT;
+        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        io_conf.pull_up_en   = GPIO_PULLUP_DISABLE;
+
+        uint64_t mask = 0;
+        if (_dc_gpio  >= 0) mask |= 1ULL << _dc_gpio;
+        if (_rst_gpio >= 0) mask |= 1ULL << _rst_gpio;
+        if (_bl_gpio  >= 0) mask |= 1ULL << _bl_gpio;
+
+        io_conf.pin_bit_mask = mask;
+
+        esp_err_t err = gpio_config(&io_conf);
+        if (err != ESP_OK) return err;
+
+        set_dc(false);
+        backlight(true);
+
+        return ESP_OK;
+    }
+
+    inline esp_err_t config_spi_device()
+    {
+        spi_device_interface_config_t devcfg = {};
+        devcfg.mode = 0;
+        devcfg.clock_speed_hz = _spi_clock_hz;
+        devcfg.spics_io_num = _cs_gpio;
+        devcfg.queue_size = 4;
+        devcfg.flags = 0;
+
+        return spi_bus_add_device(_spi_host, &devcfg, &_spi_dev);
+    }
+
+    inline void reset_panel()
+    {
+        if (_rst_gpio < 0) {
+            return;
+        }
+
+        delay_ms(20);
+
+        gpio_set_level((gpio_num_t)_rst_gpio, 0);
+        delay_ms(20);
+        gpio_set_level((gpio_num_t)_rst_gpio, 1);
+        delay_ms(20);
+    }
+
+    inline void write_cmd(uint8_t cmd)
+    {
+        set_dc(false);
+
+        spi_transaction_t t = {};
+        t.length   = 8;
+        t.tx_buffer = &cmd;
+        spi_device_transmit(_spi_dev, &t);
+    }
+
+    inline void write_data(const uint8_t *data, size_t len)
+    {
+        set_dc(true);
+
+        spi_transaction_t t = {};
+        t.length   = len * 8;
+        t.tx_buffer = data;
+        spi_device_transmit(_spi_dev, &t);
+    }
+
+    template<typename... Ts>
+    inline void write_data_bytes(Ts... values)
+    {
+        static_assert(sizeof...(Ts) > 0, "write_data_bytes requires at least one byte");
+
+        // Allow integral + enum types
+        static_assert(
+            (std::conjunction_v<
+                std::bool_constant<
+                    std::is_integral_v<Ts> || std::is_enum_v<Ts>
+                >...
+            >),
+            "write_data_bytes only accepts integral or enum types"
+        );
+
+        uint8_t buf[sizeof...(Ts)] = {
+            static_cast<uint8_t>(values)...
+        };
+
+        write_data(buf, sizeof...(Ts));
+    }
+
+    inline void set_window(uint16_t x0, uint16_t y0,
+                           uint16_t x1, uint16_t y1)
+    {
+        // Column (X)
+        write_cmd(0x2A);
+        write_data_bytes(x0 >> 8, x0 & 0xFF, x1 >> 8, x1 & 0xFF);
+
+        // Row (Y)
+        write_cmd(0x2B);
+        write_data_bytes(y0 >> 8, y0 & 0xFF, y1 >> 8, y1 & 0xFF);
+
+        // RAMWR
+        write_cmd(0x2C);
+    }
+
+    inline void init_waveshare_sequence()
+    {
+        reset_panel();
+
+        // MADCTL (0x36)
+        write_cmd(0x36);
+        if (_orientation == portrait) {
+            write_data_bytes(0x00);
+        } else {
+            write_data_bytes(0x70);
+        }
+
+        // COLMOD = 16-bit
+        write_cmd(0x3A);
+        write_data_bytes(0x05);
+
+        // PORCH setting
+        write_cmd(0xB2);
+        write_data_bytes(0x0B, 0x0B, 0x00, 0x33, 0x35);
+
+        // Gate control
+        write_cmd(0xB7);
+        write_data_bytes(0x11);
+
+        write_cmd(0xBB);
+        write_data_bytes(0x35);
+
+        write_cmd(0xC0);
+        write_data_bytes(0x2C);
+
+        write_cmd(0xC2);
+        write_data_bytes(0x01);
+
+        write_cmd(0xC3);
+        write_data_bytes(0x0D);
+
+        write_cmd(0xC4);
+        write_data_bytes(0x20);
+
+        write_cmd(0xC6);
+        write_data_bytes(0x13);
+
+        write_cmd(0xD0);
+        write_data_bytes(0xA4, 0xA1);
+
+        write_cmd(0xD6);
+        write_data_bytes(0xA1);
+
+        // Positive voltage gamma
+        write_cmd(0xE0);
+        write_data_bytes(
+            0xF0, 0x06, 0x0B, 0x0A, 0x09, 0x26, 0x29, 0x33,
+            0x41, 0x18, 0x16, 0x15, 0x29, 0x2D
+        );
+
+        // Negative voltage gamma
+        write_cmd(0xE1);
+        write_data_bytes(
+            0xF0, 0x04, 0x08, 0x08, 0x07, 0x03, 0x28, 0x32,
+            0x40, 0x3B, 0x19, 0x18, 0x2A, 0x2E
+        );
+
+        // Display inversion ON
+        write_cmd(0x21);
+
+        // Sleep out + display on
+        write_cmd(0x11);
+        delay_ms(120);
+        write_cmd(0x29);
+    }
+
+    inline void set_dc(bool data)
+    {
+        if (_dc_gpio >= 0) {
+            gpio_set_level((gpio_num_t)_dc_gpio, data ? 1 : 0);
+        }
+    }
+
+private:
+    spi_host_device_t    _spi_host;
+    spi_device_handle_t  _spi_dev;
+    int                  _cs_gpio;
+    int                  _dc_gpio;
+    int                  _rst_gpio;
+    int                  _bl_gpio;
+    uint32_t             _width;
+    uint32_t             _height;
+    int                  _spi_clock_hz;
+    orientation_t        _orientation;
+};
