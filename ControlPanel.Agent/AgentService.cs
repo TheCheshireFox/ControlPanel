@@ -1,43 +1,52 @@
-using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
-using Agent.WebSocket;
+using ControlPanel.Agent.Extensions;
+using ControlPanel.Agent.Options;
+using ControlPanel.Agent.Shared;
+using ControlPanel.Agent.WebSocket;
 using ControlPanel.Protocol;
+using ControlPanel.WebSocket;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
-namespace Agent;
+namespace ControlPanel.Agent;
 
-public class AgentService
+public class AgentService : BackgroundService
 {
     private readonly Uri _bridgeUri;
     private readonly IAudioAgent _audioAgent;
     private readonly IWebSocketFactory _webSocketFactory;
+    private readonly ITextWebSocketClientFactory _clientFactory;
     private readonly ILogger<AgentService> _logger;
     private readonly TimeSpan _snapshotInterval = TimeSpan.FromSeconds(1);
     private readonly TimeSpan _reconnectDelay = TimeSpan.FromSeconds(3);
 
-    public AgentService(Uri bridgeUri, IAudioAgent audioAgent, IWebSocketFactory webSocketFactory, ILogger<AgentService> logger)
+    public AgentService(IOptions<AgentServiceOptions> options, IAudioAgent audioAgent, IWebSocketFactory webSocketFactory, ITextWebSocketClientFactory clientFactory, ILogger<AgentService> logger)
     {
-        _bridgeUri = bridgeUri;
+        _bridgeUri = new Uri($"ws://{options.Value.Address}/agents/{options.Value.AgentId}/ws");
         _audioAgent = audioAgent;
         _logger = logger;
         _webSocketFactory = webSocketFactory;
+        _clientFactory = clientFactory;
     }
     
-    public async Task RunAsync(CancellationToken cancellationToken)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        while (!cancellationToken.IsCancellationRequested)
+        while (!stoppingToken.IsCancellationRequested)
         {
             using var ws = _webSocketFactory.Create();
 
             try
             {
                 _logger.LogInformation("connecting to {Uri}", _bridgeUri);
-                await ws.ConnectAsync(_bridgeUri, cancellationToken);
+                await ws.ConnectAsync(_bridgeUri, stoppingToken);
                 _logger.LogInformation("connected");
 
-                using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
 
+                await SendAgentInitMessageAsync(ws,  linkedCts.Token);
+                
                 var sendTask = SendSnapshotsLoopAsync(ws, linkedCts.Token);
                 var recvTask = ReceiveCommandsLoopAsync(ws, linkedCts.Token);
                 
@@ -48,7 +57,7 @@ public class AgentService
 
                 _logger.LogInformation("connection ended");
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 // shutting down
                 break;
@@ -58,18 +67,25 @@ public class AgentService
                 _logger.LogError(ex, "connection error");
             }
 
-            if (cancellationToken.IsCancellationRequested)
+            if (stoppingToken.IsCancellationRequested)
                 break;
             
             _logger.LogInformation("reconnecting in {Delay}...", _reconnectDelay);
             try
             {
-                await Task.Delay(_reconnectDelay, cancellationToken);
+                await Task.Delay(_reconnectDelay, stoppingToken);
             }
             catch (OperationCanceledException) { }
         }
 
         _logger.LogInformation("stopped");
+    }
+
+    private async Task SendAgentInitMessageAsync(IWebSocket ws, CancellationToken cancellationToken)
+    {
+        var dsc = await _audioAgent.GetAudioAgentDescription();
+        var msg = new AgentInitMessage(dsc.AgentIcon);
+        await ws.SendJsonAsync(msg, cancellationToken);
     }
     
     private async Task SendSnapshotsLoopAsync(IWebSocket ws, CancellationToken cancellationToken)
@@ -84,12 +100,8 @@ public class AgentService
                     break;
 
                 var streams = await _audioAgent.GetAudioStreamsAsync(cancellationToken);
-                var msg = new StreamsMessage(streams.Select(x => new BridgeAudioStream(x.Id, x.Name, x.Mute, x.Volume)).ToArray());
-
-                var json = JsonSerializer.Serialize(msg);
-                var bytes = Encoding.UTF8.GetBytes(json);
-
-                await ws.SendAsync(bytes, cancellationToken);
+                var msg = new StreamsMessage(streams.Select(x => new BridgeAudioStream(x.Id, x.Source, x.Name, x.Mute, x.Volume)).ToArray());
+                await ws.SendJsonAsync(msg, cancellationToken);
             }
         }
         finally
@@ -100,79 +112,40 @@ public class AgentService
     
     private async Task ReceiveCommandsLoopAsync(IWebSocket ws, CancellationToken cancellationToken)
     {
-        var buffer = new byte[8192];
-
-        while (!cancellationToken.IsCancellationRequested && ws.Connected)
-        {
-            using var ms = new MemoryStream();
-
-            WebSocketReceiveResult? result;
-            do
-            {
-                result = await ws.ReceiveAsync(buffer, cancellationToken);
-
-                if (result.MessageType == WebSocketMessageType.Close)
-                {
-                    _logger.LogWarning("server closed websocket");
-                    await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "bye", cancellationToken);
-                    return;
-                }
-
-                ms.Write(buffer, 0, result.Count);
-
-            } while (!result.EndOfMessage);
-
-            var json = Encoding.UTF8.GetString(ms.ToArray());
-            if (string.IsNullOrWhiteSpace(json))
-                continue;
-
-            await HandleIncomingMessageAsync(json, cancellationToken);
-        }
+        var client = _clientFactory.Create(ws);
+        
+        await foreach(var json in client.ReceiveAsync(cancellationToken))
+            await HandleIncomingMessageAsync(ws, json, cancellationToken);
     }
     
-    private async Task HandleIncomingMessageAsync(string json, CancellationToken cancellationToken)
+    private async Task HandleIncomingMessageAsync(IWebSocket ws, string json, CancellationToken cancellationToken)
     {
         try
         {
-            using var doc = JsonDocument.Parse(json);
-            
-            var type = doc.Deserialize<BridgeMessage>()?.Type;
-            if (type == null)
+            var message = BridgeMessageJsonSerializer.Deserialize(json);
+            switch (message)
             {
-                _logger.LogError("message without Type");
-                return;
-            }
-            
-            switch (type)
-            {
-                case BridgeMessageType.SetVolume:
-                {
-                    var msg = doc.Deserialize<SetVolumeMessage>();
-                    if (msg is not null)
-                    {
-                        _logger.LogInformation("SetVolume {Id} -> {Volume}", msg.Id, msg.Volume);
-                        await SafeCallAsync(() => _audioAgent.SetVolumeAsync(msg.Id, msg.Volume, cancellationToken));
-                    }
+                case SetVolumeMessage setVolume:
+                    await SafeCallAsync(() => _audioAgent.SetVolumeAsync(setVolume.Id, setVolume.Volume, cancellationToken));
                     break;
-                }
-                case BridgeMessageType.SetMute:
-                {
-                    var msg = doc.Deserialize<SetMuteMessage>();
-                    if (msg is not null)
-                    {
-                        _logger.LogInformation("SetMute {Id} -> {Mute}", msg.Id, msg.Mute);
-                        await SafeCallAsync(() => _audioAgent.ToggleMuteAsync(msg.Id, msg.Mute, cancellationToken));
-                    }
+                case SetMuteMessage setMute:
+                    await SafeCallAsync(() => _audioAgent.ToggleMuteAsync(setMute.Id, setMute.Mute, cancellationToken));
                     break;
-                }
+                case GetIconMessage getIcon:
+                    await SafeCallAsync(async () =>
+                    {
+                        var icon = await _audioAgent.GetAudioStreamIconAsync(getIcon.Source, cancellationToken);
+                        await ws.SendJsonAsync(new AudioStreamIconMessage(getIcon.Source, icon.Icon), cancellationToken);
+                    });
+                    break;
                 default:
-                    _logger.LogWarning("unknown message type '{type}'", type);
+                    _logger.LogWarning("unknown message type '{Type}'", message.Type);
                     break;
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[agent] failed to handle message: {ex}");
+            _logger.LogError(ex, "failed to handle message");
         }
     }
 

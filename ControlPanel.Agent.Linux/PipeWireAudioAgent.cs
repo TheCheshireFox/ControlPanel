@@ -2,28 +2,32 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
-using ControlPanel.Agent.IconLocator;
+using ControlPanel.Agent.Shared;
+using ControlPanel.Shared;
+using ControlPanel.Shared.Extensions;
 
-namespace ControlPanel.Agent;
+// ReSharper disable ClassNeverInstantiated.Local
 
-file record PipeWireNodeProps(
+namespace ControlPanel.Agent.Linux;
+
+internal record PipeWireNodeProps(
     [property: JsonPropertyName("mute")] bool Mute,
     [property: JsonPropertyName("channelVolumes")] double[] ChannelVolumes);
 
-file record PipeWireNodeParams(
+internal record PipeWireNodeParams(
     [property: JsonPropertyName("Props")] PipeWireNodeProps[]? Props);
 
-file record PipeWireNodeInfo(
+internal record PipeWireNodeInfo(
     [property: JsonPropertyName("props")] Dictionary<string, JsonValue> Props,
     [property: JsonPropertyName("state")] string State,
     [property: JsonPropertyName("params")] PipeWireNodeParams? Params);
 
-file record PipeWireNode(
+internal record PipeWireNode(
     [property: JsonPropertyName("id")] int Id,
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("info")] PipeWireNodeInfo? Info);
 
-file static class DictionaryExtension
+internal static class DictionaryExtension
 {
     public static T? GetProperty<T>(this IDictionary<string, JsonValue> props, string key, T? defaultValue = default)
         => props.TryGetValue(key, out var jsonValue) && jsonValue.TryGetValue<T>(out var value) ? value :  defaultValue;
@@ -31,15 +35,16 @@ file static class DictionaryExtension
 
 public class PipeWireAudioAgent : IAudioAgent
 {
+    public Task<AudioAgentDescription> GetAudioAgentDescription()
+    {
+        return Task.FromResult(new AudioAgentDescription(
+            AgentIcon: ResourceLoader.Load("Assets/linux-logo.svg").ReadAllBytes()
+        ));
+    }
+
     public async Task<AudioStream[]> GetAudioStreamsAsync(CancellationToken cancellationToken)
     {
-        var process = Process.Start(new ProcessStartInfo("pw-dump")
-        {
-            RedirectStandardOutput = true
-        }) ?? throw new Exception("Unable to start pw-dump");
-
-        var streams = (await JsonSerializer
-            .DeserializeAsync<PipeWireNode[]>(process.StandardOutput.BaseStream, cancellationToken: cancellationToken))?
+        var streams = (await GetPipeWireNodes(cancellationToken))
             .Where(x => x.Info is { Params.Props.Length: > 0, Props.Count: > 0 })
             .Where(x => x.Type == "PipeWire:Interface:Node" 
                         && x.Info!.Props.TryGetValue("media.class", out var v) && v.GetValue<string>() == "Stream/Output/Audio"
@@ -49,20 +54,16 @@ public class PipeWireAudioAgent : IAudioAgent
                 // to mute nullable warnings
                 var info = x.Info!;
                 var props = x.Info!.Params!.Props![0];
-                var binaryName = GetBinaryName(info.Props);
-                var icon = !string.IsNullOrEmpty(binaryName) ? LinuxIconLocator.FindIcon(binaryName) : null;
                 return new AudioStream(
                     Id: x.Id.ToString(),
+                    Source: GetBinaryName(info.Props),
                     Name: BuildDisplayName(x.Id, info.Props),
-                    Icon: icon != null ? new AudioStreamIcon(Path.GetFileName(icon), File.ReadAllBytes(icon)) : AudioStreamIcon.Default,
                     Mute: props.Mute,
                     Volume: Math.Pow(props.ChannelVolumes.Average(), 1.0 / 3));
             })
             .ToArray();
-        
-        await process.WaitForExitAsync(cancellationToken);
 
-        return streams ?? throw new Exception("Unable to deserialize json audio streams");
+        return streams;
     }
 
     public async Task SetVolumeAsync(string id, double volume, CancellationToken cancellationToken)
@@ -75,8 +76,32 @@ public class PipeWireAudioAgent : IAudioAgent
     {
         await ProcessExecAsync("pw-cli", ["s", id, "Props", $"{{mute: {(mute ? "true" : "false")}}}"],  cancellationToken);
     }
+
+    public async Task<AudioStreamIcon> GetAudioStreamIconAsync(string source, CancellationToken cancellationToken)
+    {
+        var icon = IconLocator.FindIcon(source);
+        
+        return string.IsNullOrEmpty(icon)
+            ? AudioStreamIcon.Default
+            : new AudioStreamIcon(await File.ReadAllBytesAsync(icon, cancellationToken));
+    }
+
+    private static async Task<PipeWireNode[]> GetPipeWireNodes(CancellationToken cancellationToken)
+    {
+        var process = Process.Start(new ProcessStartInfo("pw-dump")
+        {
+            RedirectStandardOutput = true
+        }) ?? throw new Exception("Unable to start pw-dump");
+
+        var nodes = await JsonSerializer.DeserializeAsync<PipeWireNode[]>(process.StandardOutput.BaseStream, cancellationToken: cancellationToken)
+               ?? throw new Exception("Unable to deserialize json audio streams");
+        
+        await process.WaitForExitAsync(cancellationToken);
+        
+        return nodes;
+    }
     
-    private static bool IsGenericName(string? mediaName, string? appName, string? nodeDesc)
+    private static bool IsGenericName(string? mediaName, string? appName, string? nodeDesc, string? nodeName)
     {
         if (string.IsNullOrWhiteSpace(mediaName))
             return true;
@@ -86,12 +111,13 @@ public class PipeWireAudioAgent : IAudioAgent
             return true;
         if (!string.IsNullOrWhiteSpace(nodeDesc) && mediaName == nodeDesc)
             return true;
-
+        
         // a few PipeWire-ish boring names — purely agent-local
-        return mediaName is "Audio Stream" or "audio stream" or "Playback Stream";
+        return mediaName is "Audio Stream" or "audio stream" or "Playback Stream"
+               || mediaName.StartsWith("audio") && (nodeName?.StartsWith("qemu") ?? false);
     }
 
-    private static string? GetBinaryName(Dictionary<string, JsonValue> props)
+    private static string GetBinaryName(Dictionary<string, JsonValue> props)
     {
         var name = props.GetProperty<string>("application.process.binary");
         if (!string.IsNullOrEmpty(name))
@@ -99,9 +125,9 @@ public class PipeWireAudioAgent : IAudioAgent
         
         var pid = props.GetProperty<int>("application.process.id");
         if (pid > 0)
-            return Path.GetFileName(Mono.Unix.UnixPath.GetRealPath(Path.Combine("/proc", pid.ToString(), "exe")));
+            return ProcessUtility.GetBinaryPath(pid) ?? string.Empty;
         
-        return null;
+        return string.Empty;
     }
     
     private static string BuildDisplayName(int id, Dictionary<string, JsonValue> props)
@@ -112,7 +138,7 @@ public class PipeWireAudioAgent : IAudioAgent
         var nodeName = props.GetProperty<string>("node.name");
 
         // 1) media.name when it seems specific
-        if (!IsGenericName(mediaName, appName, nodeDesc))
+        if (!IsGenericName(mediaName, appName, nodeDesc, nodeName))
         {
             return !string.IsNullOrWhiteSpace(appName)
                 ? $"{appName}: {mediaName}"

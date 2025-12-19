@@ -1,4 +1,9 @@
+using MessagePack;
+
 namespace ControlPanel.Bridge.Protocol;
 
-public record SetVolumeMessage(string Id, string AgentId, double Volume)
+[MessagePackObject(true)]
+public record UartSetVolumeMessage(
+    [property: Key("id")] UartAudioStreamId Id, 
+    [property: Key("volume")] double Volume)
     : UartMessage(UartMessageType.SetVolume);

@@ -1,0 +1,25 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net9.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <Configurations>Debug;Release</Configurations>
+        <Platforms>AnyCPU;x64</Platforms>
+        <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
+    </PropertyGroup>
+    
+    <ItemGroup>
+        <PackageReference Include="ini-parser-netstandard" Version="2.5.3" />
+        <PackageReference Include="Mono.Posix.NETStandard" Version="1.0.0" />
+    </ItemGroup>
+    
+    <ItemGroup>
+      <ProjectReference Include="..\ControlPanel.Agent.Shared\ControlPanel.Agent.Shared.csproj" />
+      <ProjectReference Include="..\ControlPanel.Shared\ControlPanel.Shared.csproj" />
+    </ItemGroup>
+    
+    <ItemGroup>
+      <EmbeddedResource Include="Assets\linux-logo.svg" />
+    </ItemGroup>
+</Project>

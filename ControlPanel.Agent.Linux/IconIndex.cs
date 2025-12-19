@@ -2,7 +2,7 @@ using System.Text.RegularExpressions;
 
 namespace ControlPanel.Agent.Linux;
 
-internal partial class LinuxIconIndex
+internal partial class IconIndex
 {
     private record IconInfo(int Size, string Extension, string Theme, string Path);
     
@@ -15,7 +15,7 @@ internal partial class LinuxIconIndex
     private readonly int _iconSize;
     private readonly Dictionary<string, List<IconInfo>> _index = new();
 
-    public LinuxIconIndex(string[] themes, int iconSize)
+    public IconIndex(string[] themes, int iconSize)
     {
         _themes = themes;
         _iconSize = iconSize;

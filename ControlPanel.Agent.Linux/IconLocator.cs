@@ -3,14 +3,14 @@ using IniParser.Model;
 
 namespace ControlPanel.Agent.Linux;
 
-public static class LinuxIconLocator
+public static class IconLocator
 {
     private const string FallbackTheme = "hicolor";
     
     private static readonly Dictionary<string, string> _appsIcons = new();
     private static readonly IconIndex _iconIndex;
 
-    static LinuxIconLocator()
+    static IconLocator()
     {
         _iconIndex = new IconIndex([GetCurrentTheme(), FallbackTheme], iconSize: 32);
         RefreshCache();

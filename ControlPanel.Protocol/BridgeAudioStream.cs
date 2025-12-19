@@ -1,6 +1,3 @@
 namespace ControlPanel.Protocol;
 
-public class BridgeAudioStream
-{
-    
-}
+public record BridgeAudioStream(string Id, string Source, string Name, bool Mute, double Volume);

@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+    <PropertyGroup>
+        <TargetFramework>net9.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Configurations>Debug;Release</Configurations>
+        <Platforms>AnyCPU;x64</Platforms>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\ControlPanel.Protocol\ControlPanel.Protocol.csproj" />
+      <ProjectReference Include="..\ControlPanel.Shared\ControlPanel.Shared.csproj" />
+      <ProjectReference Include="..\ControlPanel.WebSocket\ControlPanel.WebSocket.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <PackageReference Include="MessagePack" Version="3.1.4" />
+      <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.1" />
+      <PackageReference Include="Nito.AsyncEx" Version="5.1.2" />
+      <PackageReference Include="SixLabors.Fonts" Version="2.1.3" />
+      <PackageReference Include="SixLabors.ImageSharp.Drawing" Version="2.1.7" />
+      <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="3.119.1" />
+      <PackageReference Include="System.IO.Ports" Version="10.0.0" />
+      <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
+      <PackageReference Include="SkiaSharp" Version="3.119.1" />
+      <PackageReference Include="Svg.Skia" Version="3.2.1" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <None Remove="Asset\linux-logo.svg" />
+      <None Remove="Asset\win-logo.svg" />
+    </ItemGroup>
+
+</Project>

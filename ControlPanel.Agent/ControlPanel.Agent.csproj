@@ -1,20 +1,40 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <OutputType>Exe</OutputType>
         <TargetFramework>net9.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <Configurations>Debug;Release</Configurations>
+        <Platforms>AnyCPU;x64</Platforms>
     </PropertyGroup>
 
+    <PropertyGroup Condition="'$(RuntimeIdentifier)' != 'win-x64'">
+        <OutputType>Exe</OutputType>
+    </PropertyGroup>
+    
+    <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'win-x64'">
+        <OutputType>WinExe</OutputType>
+    </PropertyGroup>
+    
     <ItemGroup>
-      <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.0" />
-      <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.0" />
+      <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.1" />
+      <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.1" />
+      <PackageReference Include="Microsoft.Extensions.FileSystemGlobbing" Version="10.0.1" />
+      <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.1" />
+      <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.1" />
+      <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.1" />
+      <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.1" />
+      <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.1" />
+      <PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />
+      <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
     </ItemGroup>
 
     <ItemGroup>
+      <ProjectReference Include="..\ControlPanel.Agent.Linux\ControlPanel.Agent.Linux.csproj" />
+      <ProjectReference Include="..\ControlPanel.Agent.Windows\ControlPanel.Agent.Windows.csproj" />
       <ProjectReference Include="..\ControlPanel.Protocol\ControlPanel.Protocol.csproj" />
       <ProjectReference Include="..\ControlPanel.Shared\ControlPanel.Shared.csproj" />
+      <ProjectReference Include="..\ControlPanel.WebSocket\ControlPanel.WebSocket.csproj" />
     </ItemGroup>
 
 </Project>

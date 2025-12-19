@@ -8,16 +8,32 @@
 #include "driver/i2c.h"
 #include "esp_timer.h"
 
-#define CALLBACK(that, fn) +[](void* a) { ((decltype(that))a)->fn(); }
+#include "esp_utility.hpp"
+
+struct semaphore_t
+{
+    semaphore_t() : _s(xSemaphoreCreateRecursiveMutex()) { }
+    semaphore_t(semaphore_t&& other) : _s(other._s) { other._s = nullptr; }
+    semaphore_t(semaphore_t&) = delete;
+    semaphore_t(const semaphore_t&) = delete;
+
+    void lock() { if (_s != nullptr) xSemaphoreTakeRecursive(_s, portMAX_DELAY); }
+    void unlock() { if (_s != nullptr) xSemaphoreGiveRecursive(_s); }
+
+    ~semaphore_t() { if (_s != nullptr) vSemaphoreDelete(_s); }
+private:
+    SemaphoreHandle_t _s = nullptr;
+};
 
 typedef struct {
-    bool touched;
-    uint32_t last_touch_ms;
-    uint16_t x;
-    uint16_t y;
+    bool touched = false;
+    uint32_t last_touch_ms = 0;
+    uint16_t x = 1;
+    uint16_t y = 1;
 } touch_point_t;
 
 class cst328_driver_t {
+    static constexpr char TAG[] = "CST328";
     static constexpr uint8_t CST328_I2C_ADDR = 0x1A;
     static constexpr uint16_t CST328_REG_NUM = 0xD005;
     static constexpr uint16_t CST328_REG_XY = 0xD000;
@@ -50,45 +66,45 @@ public:
             }
         };
 
-        _last_point.last_touch_ms = 0;
-        _last_point.touched = false;
-        _last_point.x = 1;
-        _last_point.y = 1;
-
-        _last_point_mutex = xSemaphoreCreateMutex();
-        configASSERT(_last_point_mutex);
-
         ESP_ERROR_CHECK(i2c_param_config(port, &conf));
         ESP_ERROR_CHECK(i2c_driver_install(port, conf.mode, 0, 0, 0));
 
         if (_interrupt)
         {
-            xTaskCreate(CALLBACK(this, touch_task), "touch_task", 4096, this, 5, &_touch_task_handle);
+            xTaskCreate(THIS_CALLBACK(this, touch_task), "touch_task", 4096, this, 5, &_touch_task_handle);
             configASSERT(_touch_task_handle);
             ESP_ERROR_CHECK(gpio_isr_handler_add((gpio_num_t)interrupt, touch_int_isr, &_touch_task_handle));
         }
     }
 
-    void init()
+    void init(bool recalibrate = false)
     {
         uint8_t cfg[2] = {0};
-        esp_err_t err = cst328_reg_read(CST328_REG_CONFIG, cfg, sizeof(cfg));
+        ESP_ERROR_CHECK(cst328_reg_read(CST328_REG_CONFIG, cfg, sizeof(cfg)));
 
-        if (err == ESP_OK) {
-            ESP_LOGI("CST328", "Touch OK, CONFIG[0..1]=0x%02X 0x%02X", cfg[0], cfg[1]);
-        } else {
-            ESP_LOGW("CST328", "Touch controller NOT responding: %s", esp_err_to_name(err));
+        if (recalibrate)
+        {
+            ESP_LOGI(TAG, "Calibrating...");
+
+            uint8_t cmd = 0x04;
+            ESP_ERROR_CHECK(cst328_reg_write(0xD104, &cmd, 1));
+
+            vTaskDelay(pdMS_TO_TICKS(250));
+
+            ESP_LOGI(TAG, "Calibrated");
         }
+
+        ESP_LOGI(TAG, "Initialized");
     }
 
     touch_point_t get_touch() {
+        std::unique_lock lock{_sync};
+
         touch_point_t pt;
         
         if (_interrupt)
         {
-            xSemaphoreTake(_last_point_mutex, portMAX_DELAY);
             pt = _last_point;
-            xSemaphoreGive(_last_point_mutex);
         }
         else
         {
@@ -98,7 +114,10 @@ public:
         return pt;
     }
 
-    void on_touch(std::function<void(const touch_point_t&)> cb) {
+    template<typename F>
+    void on_touch(F&& cb) {
+        std::unique_lock lock{_sync};
+
         if (!_interrupt)
             return;
 
@@ -121,18 +140,18 @@ private:
     {
         touch_point_t pt;
 
-        for (;;)
+        while (true)
         {
-            // Block until ISR gives a notification
             ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
             if (cst328_read_xy_single(pt) != ESP_OK) {
                 continue;
             }
 
-            xSemaphoreTake(_last_point_mutex, portMAX_DELAY);
-            _last_point = pt;
-            xSemaphoreGive(_last_point_mutex);
+            {
+                std::unique_lock lock{_sync};
+                _last_point = pt;
+            }
 
             if (_on_touch) {
                 _on_touch(pt);
@@ -171,8 +190,7 @@ private:
 
         i2c_master_stop(cmd);
 
-        esp_err_t err = i2c_master_cmd_begin(
-            _port, cmd, 1000 / portTICK_PERIOD_MS);
+        esp_err_t err = i2c_master_cmd_begin(_port, cmd, pdMS_TO_TICKS(1000));
 
         i2c_cmd_link_delete(cmd);
         return err;
@@ -180,30 +198,17 @@ private:
 
     esp_err_t cst328_read_xy_single(touch_point_t& pt)
     {
-        uint8_t num_byte = 0;
-        uint8_t clear = 0;
-        esp_err_t err;
-
-        // 1) read number of touch points (low 4 bits)
-        err = cst328_reg_read(CST328_REG_NUM, &num_byte, 1);
-        if (err != ESP_OK) {
-            return err;
-        }
-        (void)cst328_reg_write(CST328_REG_NUM, &clear, 1);
-
-        //auto touch_cnt = num_byte & 0x0F;
-        
-        // 2) read first point coordinates: 3 bytes at XY_REG+1
+        // read first point coordinates: 3 bytes at XY_REG+1
         uint8_t buf[3] = {0};
-        err = cst328_reg_read(CST328_REG_XY + 1, buf, sizeof(buf));
+        auto err = cst328_reg_read(CST328_REG_XY + 1, buf, sizeof(buf));
         if (err != ESP_OK) {
             return err;
         }
 
-        // 3) clear status (required, otherwise INT may stay active)
+        uint8_t clear = 0;
         (void)cst328_reg_write(CST328_REG_NUM, &clear, 1);
 
-        // 4) decode 12-bit X/Y from 3 bytes
+        // decode 12-bit X/Y from 3 bytes
         //    matches:
         //    x = (buf0 << 4) + ((buf2 & 0xF0) >> 4)
         //    y = (buf1 << 4) + ( buf2 & 0x0F)
@@ -221,8 +226,8 @@ private:
 private:
     i2c_port_t _port;
     TaskHandle_t _touch_task_handle;
-    SemaphoreHandle_t _last_point_mutex;
+    std::recursive_mutex _sync;
     touch_point_t _last_point;
     std::function<void(const touch_point_t&)> _on_touch;
-    bool _interrupt;
+    const bool _interrupt;
 };

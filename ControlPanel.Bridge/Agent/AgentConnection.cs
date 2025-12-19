@@ -1,61 +1,112 @@
+using System.Text;
 using System.Text.Json;
+using ControlPanel.Bridge.Extensions;
+using ControlPanel.Bridge.Protocol;
 using ControlPanel.Protocol;
+using ControlPanel.Shared;
+using ControlPanel.Shared.Extensions;
 using ControlPanel.WebSocket;
 
 namespace ControlPanel.Bridge.Agent;
 
-public class AgentHandler
+public interface IAgentConnection
 {
-    private readonly string _agentId;
-    private readonly IControlPanelBridge _controlPanelBridge;
-    private readonly ILogger<AgentHandler> _logger;
-    private readonly ILogger<WebSocketJsonMessageHandler> _wsLogger;
+    string AgentId { get; }
+    Task SendAsync(BridgeMessage message, CancellationToken cancellationToken);
+}
 
-    public AgentHandler(string agentId, IControlPanelBridge controlPanelBridge, ILoggerFactory loggerFactory)
+public class AgentConnection : IAgentConnection
+{
+    private readonly ILogger<AgentConnection> _logger;
+    private readonly ITextWebSocketClient _ws;
+    private readonly IAudioStreamRepository _audioStreamRepository;
+    private readonly IAudioStreamIconCache _audioStreamIconCache;
+    private readonly IControllerConnection _controllerConnection;
+
+    private readonly AgentAppIconProvider _agentAppIconProvider = new(32, 10);
+    
+    public string AgentId { get; }
+    
+    public AgentConnection(string agentId,
+        ITextWebSocketClient ws,
+        IAudioStreamRepository audioStreamRepository,
+        IAudioStreamIconCache audioStreamIconCache,
+        IControllerConnection controllerConnection,
+        ILogger<AgentConnection> logger)
     {
-        _agentId = agentId;
-        _controlPanelBridge = controlPanelBridge;
-        _logger = loggerFactory.CreateLogger<AgentHandler>();
-        _wsLogger = loggerFactory.CreateLogger<WebSocketJsonMessageHandler>();
+        AgentId = agentId;
+        _ws = ws;
+        _audioStreamRepository = audioStreamRepository;
+        _audioStreamIconCache = audioStreamIconCache;
+        _controllerConnection = controllerConnection;
+        _logger = logger;
     }
     
-    public async Task HandleAgentAsync(IWebSocket ws, CancellationToken cancellationToken)
+    public async Task HandleAgentAsync(CancellationToken cancellationToken)
     {
-        var wsHandler = new WebSocketJsonMessageHandler(ws, _wsLogger);
-       
-        await foreach(var json in wsHandler.HandleAsync(cancellationToken))
+        await foreach(var json in _ws.ReceiveAsync(cancellationToken))
             await HandleAgentMessageAsync(json, cancellationToken);
     }
 
+    public Task SendAsync(BridgeMessage message, CancellationToken cancellationToken)
+    {
+        return _ws.SendAsync(JsonSerializer.Serialize((dynamic)message), cancellationToken);
+    }
+    
     private async Task HandleAgentMessageAsync(string json, CancellationToken cancellationToken)
     {
         try
         {
             using var doc = JsonDocument.Parse(json);
             
+            _logger.LogDebug("{json}", json);
+            
             var type = doc.Deserialize<BridgeMessage>()?.Type;
             if (type == null)
             {
-                _logger.LogError("message without Type, agent: {Id}", _agentId);
+                _logger.LogError("message without Type, agent: {Id}", AgentId);
                 return;
             }
             
             switch (type)
             {
+                case BridgeMessageType.AgentInit:
+                {
+                    var msg = doc.Deserialize<AgentInitMessage>() ?? throw new JsonException($"Unable to parse {nameof(UartMessageType.Streams)} message");
+                    _agentAppIconProvider.SetAgentIcon(msg.AgentIcon);
+                    break;
+                }
                 case BridgeMessageType.Streams:
                 {
-                    var msg = doc.Deserialize<StreamsMessage>() ?? throw new Exception($"Unable to parse {nameof(BridgeMessageType.Streams)} message");
-                    await _controlPanelBridge.SendStreamsAsync(msg.Streams,  cancellationToken);
+                    var msg = doc.Deserialize<StreamsMessage>() ?? throw new JsonException($"Unable to parse {nameof(UartMessageType.Streams)} message");
+                    await _audioStreamRepository.UpdateAsync(AgentId, msg.Streams, cancellationToken);
+                    break;
+                }
+                case BridgeMessageType.Icon:
+                {
+                    var msg = doc.Deserialize<AudioStreamIconMessage>() ?? throw new JsonException($"Unable to parse {nameof(UartMessageType.Streams)} message");
+                    await _controllerConnection.SendMessageAsync(new UartIconMessage(msg.Source, AgentId, ToUartIcon(msg)), cancellationToken);
                     break;
                 }
                 default:
-                    _logger.LogWarning("unknown message type '{type}', agent: {Id}", type, _agentId);
+                    _logger.LogWarning("Unknown message type '{type}', agent: {Id}", type, AgentId);
                     break;
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "failed to handle message, agent: {Id}", _agentId);
+            _logger.LogError(ex, "Failed to handle message, agent: {Id}", AgentId);
         }
+    }
+
+    private byte[] ToUartIcon(AudioStreamIconMessage msg)
+    {
+        using var appImg = _agentAppIconProvider.GetAgentAppIcon(msg.Icon);
+        var icon = LvglImageConverter.ConvertToRgb565A8(appImg);
+                    
+        _logger.LogDebug("New icon: {Source}, size: {Size}", msg.Source, msg.Icon.Length);
+        _audioStreamIconCache.AddIcon(msg.Source, AgentId, icon);
+
+        return icon;
     }
 }

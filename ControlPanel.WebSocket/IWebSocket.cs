@@ -1,6 +1,6 @@
 using System.Net.WebSockets;
 
-namespace ControlPanel.Agent.WebSocket;
+namespace ControlPanel.WebSocket;
 
 public interface IWebSocket : IDisposable
 {

@@ -1,0 +1,12 @@
+[Unit]
+Description=ControlPanel Agent service
+After=network.target sound.target
+
+[Service]
+Type=notify
+ExecStart=%h/.local/bin/ControlPanel.Bridge
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -1,6 +1,4 @@
 namespace ControlPanel.Protocol;
 
-public class SetMuteMessage
-{
-    
-}
+public record SetMuteMessage(string Id, bool Mute)
+    : BridgeMessage(BridgeMessageType.SetMute);

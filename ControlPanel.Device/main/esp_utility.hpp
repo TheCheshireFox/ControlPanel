@@ -1,16 +1,40 @@
 #pragma once
 
+#include <memory>
+
+#include "esp_timer.h"
 #include "esp_log.h"
 #include "esp_err.h"
 
-#define ESP_ASSERT_CHECK(x, tag, msg) ({\
+#define ESP_ASSERT_LOG(x, tag, msg) ({\
         if (unlikely(!x)) {\
             ESP_LOGE(tag, "%s", msg);\
             configASSERT(x);\
         }\
     })
-#define ESP_LOGI_FLUSH(...) do {ESP_LOGI(__VA_ARGS__); fflush(stdout); uart_wait_tx_done(UART_NUM_0, pdMS_TO_TICKS(100));} while(0)
+
 #define THIS_CALLBACK(that, fn) +[](void* a) {\
-    ESP_ASSERT_CHECK(a, "CALLBACK", "'this' is null");\
+    ESP_ASSERT_LOG(a, "CALLBACK", "'this' is null");\
     ((decltype(that))a)->fn();\
+}
+
+using esp_timer_ptr = std::unique_ptr<esp_timer_handle_t, void(*)(esp_timer_handle_t*)>;
+
+esp_timer_ptr make_esp_timer(const esp_timer_create_args_t& args)
+{
+    static auto deleter = +[](esp_timer_handle_t* timer)
+    {
+        if (timer == nullptr) return;
+        if (*timer != nullptr)
+        {
+            esp_timer_stop(*timer);
+            esp_timer_delete(*timer);
+        }
+        delete timer;
+    };
+
+    auto ptr = esp_timer_ptr(new esp_timer_handle_t(nullptr), deleter);
+    ESP_ERROR_CHECK(esp_timer_create(&args, &*ptr));
+
+    return ptr;
 }

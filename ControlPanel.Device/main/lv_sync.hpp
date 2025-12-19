@@ -1,5 +1,6 @@
 #pragma once
 
+#include "esp_log.h"
 #include <mutex>
 
 struct lv_lock_t {
@@ -17,7 +18,7 @@ struct lv_timer_lock_t {
     lv_timer_lock_t(lv_lock_t& lv_lck) : _lv_lock(lv_lck) {}
 
 #if LV_USE_OS != LV_OS_NONE
-    void lock() { }
+    void lock() {  }
     void unlock() { }
 #else
     void lock() { _lv_lock.lock(); }

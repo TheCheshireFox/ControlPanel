@@ -1,59 +1,61 @@
-﻿using System.Globalization;
-using System.Net.WebSockets;
+﻿using System.Diagnostics;
+using System.Globalization;
 using System.Text;
-using System.Text.Json;
-using Agent.WebSocket;
-using ControlPanel.Protocol;
+using ControlPanel.Agent.Linux;
+using ControlPanel.Agent.Options;
+using ControlPanel.Agent.Shared;
+using ControlPanel.Agent.WebSocket;
+using ControlPanel.Agent.Windows;
 using ControlPanel.Shared;
 using ControlPanel.Shared.Logging;
+using ControlPanel.WebSocket;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Console;
-using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging.Configuration;
+using Microsoft.Extensions.Logging.EventLog;
+using Serilog;
 
-namespace Agent;
+namespace ControlPanel.Agent;
 
-public sealed class TestWebSocket : IWebSocket, IWebSocketFactory
+public class Program
 {
-    public bool Connected => true;
-
-    public Task ConnectAsync(Uri uri, CancellationToken cancellationToken)
+    public static async Task Main(string[] args)
     {
-        Console.WriteLine($"Connect {uri}");
-        return Task.CompletedTask;
+        SetUpEncoding();
+
+        var builder = Host.CreateApplicationBuilder(args);
+        
+        builder.Services.AddWindowsService(opts => opts.ServiceName = "ControlPanel.Agent");
+        builder.Services.AddSystemd();
+        
+        builder.Configuration
+            .AddJsonFile(ConfigPathProvider.Path, true, true)
+            .AddEnvironmentVariables();
+        builder.Services.Configure<AgentServiceOptions>(builder.Configuration.GetSection("Agent"));
+        
+        builder.Services.AddLogging(loggingBuilder =>
+        {
+            loggingBuilder.AddConsole(opts => opts.FormatterName = TemplateConsoleFormatter.FormatterName);
+            loggingBuilder.AddConsoleFormatter<TemplateConsoleFormatter, TemplateConsoleFormatterOptions>();
+        });
+        
+        AddFileLogging(builder);
+        
+        if (OperatingSystem.IsWindows())
+            LoggerProviderOptions.RegisterProviderOptions<EventLogSettings, EventLogLoggerProvider>(builder.Services);
+
+        builder.Services.AddSingleton<IWebSocketFactory, WebSocketFactory>();
+        builder.Services.AddSingleton<ITextWebSocketClientFactory, TextWebSocketClientFactory>();
+        builder.Services.AddSingleton(CreateAudioAgent());
+        builder.Services.AddHostedService<AgentService>();
+        
+        var host = builder.Build();
+        await host.RunAsync();
     }
 
-    public Task CloseAsync(WebSocketCloseStatus closeStatus, string statusDescription, CancellationToken cancellationToken)
-    {
-        Console.WriteLine($"Close {closeStatus} {statusDescription}");
-        return Task.CompletedTask;
-    }
-
-    public Task SendAsync(ArraySegment<byte> buffer, CancellationToken cancellationToken)
-    {
-        Console.WriteLine($"Send {Encoding.UTF8.GetString(buffer.Array!, buffer.Offset, buffer.Count)}");
-        return Task.CompletedTask;
-    }
-
-    public async Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer, CancellationToken cancellationToken)
-    {
-        await Task.Delay(10000, cancellationToken);
-        var jsonBytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new SetVolumeMessage("99999", 0.1)));
-        jsonBytes.CopyTo(buffer.Array!, buffer.Offset);
-
-        return new WebSocketReceiveResult(jsonBytes.Length, WebSocketMessageType.Text, true);
-    }
-    
-    public void Dispose()
-    {
-
-    }
-
-    public IWebSocket Create() => new TestWebSocket();
-}
-
-class Program
-{
-    static async Task Main(string[] args)
+    private static void SetUpEncoding()
     {
         Encoding.RegisterProvider(new AliasEncodingProvider(new Dictionary<string, Encoding>
         {
@@ -61,14 +63,8 @@ class Program
         }));
         CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
         CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.InvariantCulture;
-
-        var loggerProvider = CreateLoggerProvider();
-        var loggerFactory = new LoggerFactory([loggerProvider]);
-        var agent = CreateAudioAgent();
-        var service = new AgentService(new Uri("ws://localhost:8080"), agent, new TestWebSocket(), loggerFactory.CreateLogger<AgentService>());
-        await service.RunAsync(CancellationToken.None);
     }
-
+    
     private static IAudioAgent CreateAudioAgent()
     {
         return Environment.OSVersion.Platform switch
@@ -78,14 +74,18 @@ class Program
             _ => throw new NotSupportedException("Operation system not supported")
         };
     }
-    
-    private static ConsoleLoggerProvider CreateLoggerProvider()
+
+    private static void AddFileLogging(HostApplicationBuilder builder)
     {
-        var formatter = new TemplateConsoleFormatter(new OptionsWrapper<TemplateConsoleFormatterOptions>(new TemplateConsoleFormatterOptions()));
+        if (!OperatingSystem.IsWindows())
+            return;
         
-        var configureOptions = new ConfigureOptions<ConsoleLoggerOptions>(x => x.FormatterName = TemplateConsoleFormatter.FormatterName);
-        var factory = new OptionsFactory<ConsoleLoggerOptions>([configureOptions], []);
-        var options = new OptionsMonitor<ConsoleLoggerOptions>(factory, [], new OptionsCache<ConsoleLoggerOptions>());
-        return new ConsoleLoggerProvider(options, [formatter]);
+        var dir = Path.Combine(ConfigPathProvider.AppDir, "logs");
+        Log.Logger = new LoggerConfiguration()
+            .MinimumLevel.Information()
+            .WriteTo.File(Path.Combine(dir, "agent-.log"), rollingInterval: RollingInterval.Day, fileSizeLimitBytes: 1024 * 1024, shared: true)
+            .CreateLogger();
+        
+        builder.Logging.AddSerilog();
     }
 }

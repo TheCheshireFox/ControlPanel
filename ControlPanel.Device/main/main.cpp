@@ -1,3 +1,5 @@
+#define LV_ASSERT_HANDLER configASSERT(false)
+
 #include <stdio.h>
 #include <optional>
 #include <mutex>
@@ -16,17 +18,19 @@
 
 #include "cst328_driver.hpp"
 #include "waveshare_st7789.hpp"
+#include "sdspi.hpp"
 #include "volume_display.hpp"
 #include "backlight_timer.hpp"
 #include "uart.hpp"
 #include "lv_sync.hpp"
 #include "lvgl_logging.hpp"
-#include "lvgl_global_theme.hpp"
 #include "protocol.hpp"
 
 static constexpr char TAG[] = "main";
 
 // --- SPI display (ST7789T3, write-only, CS tied low) ---
+#define LCD_SPI_HOST   SPI3_HOST
+#define LCD_SPI_CLOCK  60 * 1000000
 #define PIN_LCD_MOSI   23
 #define PIN_LCD_SCLK   18
 #define PIN_LCD_CS     5
@@ -43,8 +47,18 @@ static constexpr char TAG[] = "main";
 #define PIN_TOUCH_SCL  22
 #define PIN_TOUCH_INT  4     // interrupt from touch controller
 
+// --- SD reader ---
+#define SD_SPI_HOST SPI2_HOST
+#define SD_SCK      14
+#define SD_MISO     13
+#define SD_MOSI     32
+#define SD_CS       33
+
 #define UART_PORT       UART_NUM_0
-#define UART_BUF_SIZE   512
+#define UART_BUF_SIZE   8096
+
+#define BL_TIMER_LONG  uint64_t(3600 * 1000)
+#define BL_TIMER_SHORT uint64_t(30 * 1000)
 
 static std::optional<cst328_driver_t> cst328_driver;
 static std::optional<waveshare_st7789_t> st7789_driver;
@@ -69,7 +83,7 @@ static void spi_bus_init(void)
 
 static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
 {
-    const uint32_t TOUCH_TIMEOUT_MS = 80;
+    const uint32_t TOUCH_TIMEOUT_MS = 40;
 
     (void)indev;
 
@@ -104,6 +118,8 @@ void touch_init_for_lvgl(void)
     static auto touch_indev = lv_indev_create();
     lv_indev_set_type(touch_indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(touch_indev, touch_read_cb);
+
+    ESP_LOGI(TAG, "LVGL touch initialized");
 }
 
 void panel_init(void)
@@ -113,8 +129,8 @@ void panel_init(void)
     spi_bus_init();
 
     cst328_driver.emplace(I2C_TOUCH_PORT, I2C_TOUCH_FREQ_HZ, PIN_TOUCH_SDA, PIN_TOUCH_SCL, PIN_TOUCH_INT);
-    st7789_driver.emplace(SPI3_HOST, PIN_LCD_CS, PIN_LCD_DC, PIN_LCD_RST, PIN_LCD_BL, LCD_HEIGHT ,LCD_WIDTH, 60000000, waveshare_st7789_t::orientation_t::landscape);
-    backlight_timer.emplace(*st7789_driver, uint64_t(30000));
+    st7789_driver.emplace(SPI3_HOST, PIN_LCD_CS, PIN_LCD_DC, PIN_LCD_RST, PIN_LCD_BL, LCD_HEIGHT, LCD_WIDTH, LCD_SPI_CLOCK, waveshare_st7789_t::orientation_t::landscape);
+    backlight_timer.emplace(*st7789_driver, BL_TIMER_SHORT);
     
     cst328_driver->on_touch(+[](const touch_point_t& pt) { backlight_timer->kick(); });
     cst328_driver->init();
@@ -132,6 +148,8 @@ static void lvgl_init_core()
     lv_init();
     lv_tick_set_cb(+[](){ return (uint32_t)(esp_timer_get_time() / 1000); });
     lvgl_init_logging();
+
+    ESP_LOGI(TAG, "LVGL core initialized");
 }
 
 static void lvgl_timer_init()
@@ -146,28 +164,39 @@ static void lvgl_timer_init()
             }
             vTaskDelay(next > 0 ? next : 1);
         }
-    }, "lv_timer_handler", 8096, nullptr, 5, nullptr, tskNO_AFFINITY);
+    }, "lv_timer_handler", 16384, nullptr, 5, nullptr, tskNO_AFFINITY);
+
+    ESP_LOGI(TAG, "LVGL timer started");
 }
 
 void uart0_init(void)
 {
-    uart.emplace(UART_PORT, UART_BUF_SIZE);
-    uart->register_line_handler(+[](const std::string& line)
+    uart.emplace(UART_PORT, UART_BUF_SIZE, CONFIG_ESP_CONSOLE_UART_BAUDRATE);
+    uart->register_data_handler(+[](std::span<const uint8_t> data)
     {
         backlight_timer->kick();
 
-        auto bmsg = parse_bridge_message(line);
+        auto bmsg = parse_bridge_message(data);
         if (streams_message_t* msg = std::get_if<streams_message_t>(&bmsg))
         {
-            volume_display->refresh(msg->streams);
+            ESP_LOGD(TAG, "refresh updated=%d deleted=%d", msg->updated.size(), msg->deleted.size());
+
+            volume_display->refresh(msg->updated, msg->deleted);
+            auto ms = volume_display->size() > 0
+                ? BL_TIMER_LONG
+                : BL_TIMER_SHORT;
+            backlight_timer->set_timeout(ms);
         }
         else if (icon_message_t* msg = std::get_if<icon_message_t>(&bmsg))
         {
-            volume_display->update_icon({msg->id, msg->agent_id}, msg->rgb565a8);
+            ESP_LOGD(TAG, "icon source=%s agent_id=%s sz=%d", msg->source.c_str(), msg->agent_id.c_str(), msg->icon.size());
+            volume_display->update_icon(msg->source, msg->agent_id, 32, 32, msg->icon); // TODO: get size from bridge
         }
     });
     
     uart->init();
+
+    ESP_LOGI(TAG, "UART initialized");
 }
 
 static lv_display_t* st7789_create_lvgl_display()
@@ -188,52 +217,47 @@ static lv_display_t* st7789_create_lvgl_display()
 
     lv_display_set_buffers(disp, buf, nullptr, buf_bytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
 
+    ESP_LOGI(TAG, "LVGL display created");
+
     return disp;
 }
 
 extern "C" void app_main(void)
 {
-    ESP_LOGI(TAG, "Starting minimal firmware...");
+    ESP_LOGI(TAG, "Starting app_main...");
 
     panel_init();
     lvgl_init_core();
     auto disp = st7789_create_lvgl_display();
     touch_init_for_lvgl();
-    lvgl_init_global_theme(disp);
+    app_style::init(disp);
     lvgl_timer_init();
 
-    ESP_LOGI(TAG, "Panel initialized");
-
     volume_display.emplace(0, 0, LV_PCT(100), LV_PCT(100));
-    volume_display->register_on_volume_change(+[](const event_id& id, float volume)
+    volume_display->on_volume_change(+[](const event_id& id, float volume)
     {
-        uart->send_line(serialize_bridge_message(set_volume_message_t {
-            .id = id.id,
-            .agent_id = id.agent_id,
+        uart->send_data(serialize_bridge_message(set_volume_message_t {
+            .id = { id.id, id.agent_id },
             .volume = volume
         }));
     });
-    volume_display->register_on_mute_change(+[](const event_id& id, bool mute)
+    volume_display->on_mute_change(+[](const event_id& id, bool mute)
     {
-        uart->send_line(serialize_bridge_message(set_mute_message_t {
-            .id = id.id,
-            .agent_id = id.agent_id,
+        uart->send_data(serialize_bridge_message(set_mute_message_t {
+            .id = { id.id, id.agent_id },
             .mute = mute
         }));
     });
-    volume_display->register_on_icon_missing(+[](const event_id& id)
+    volume_display->on_icon_missing(+[](const std::string& source, const std::string& agent_id)
     {
-        uart->send_line(serialize_bridge_message(get_icon_message_t {
-            .id = id.id,
-            .agent_id = id.agent_id
+        uart->send_data(serialize_bridge_message(get_icon_message_t {
+            .source = source,
+            .agent_id = agent_id
         }));
     });
 
     uart0_init();
+    uart->send_data(serialize_bridge_message(request_refresh_message_t{}));
 
-    ESP_LOGI(TAG, "Display initialized");
-    
-    while (1) {
-        vTaskDelay(pdMS_TO_TICKS(100));
-    }
+    ESP_LOGI(TAG, "Initialization completed");
 }

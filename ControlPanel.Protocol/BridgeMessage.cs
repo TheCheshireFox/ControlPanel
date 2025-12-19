@@ -1,3 +1,3 @@
 namespace ControlPanel.Protocol;
 
-public record BridgeMessage();
+public record BridgeMessage(BridgeMessageType Type);

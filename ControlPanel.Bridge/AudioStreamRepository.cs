@@ -1,111 +1,220 @@
+using System.Diagnostics.CodeAnalysis;
+using ControlPanel.Bridge.Extensions;
 using ControlPanel.Protocol;
 
 namespace ControlPanel.Bridge;
 
-public record AudioStreamState(string Id, string AgentId, string Name, bool Mute, double Volume);
+public class Comparer
+{
+    private static class ValueComparer<T>
+    {
+        public static IEqualityComparer<T> Instance = EqualityComparer<T>.Default;
+    }
+
+    private class DelegateEqualityComparer<T>(Func<T?, T?, bool> comparer) : IEqualityComparer<T>
+    {
+        public bool Equals(T? x, T? y) => comparer(x, y);
+        public int GetHashCode([DisallowNull] T obj) => obj.GetHashCode();
+    }
+    
+    public Comparer WithEqualityComparer<T>(Func<T?, T?, bool> comparer)
+    {
+        ValueComparer<T>.Instance = new DelegateEqualityComparer<T>(comparer);
+        return this;
+    }
+    
+    public bool IsEquals<T>(T x, T y) => ValueComparer<T>.Instance.Equals(x, y);
+}
+
+public record AudioStreamId(string Id, string AgentId);
+
+public record AudioStreamInfo(AudioStreamId Id, string Source, string Name, bool Mute, double Volume)
+{
+    public static AudioStreamInfo FromStream(AudioStreamId streamId, BridgeAudioStream stream)
+        => new(
+            streamId,
+            stream.Source,
+            stream.Name,
+            stream.Mute,
+            stream.Volume
+        );
+}
+
+public record AudioStreamDiff(AudioStreamId Id, string Source, string? Name, bool? Mute, double? Volume)
+{
+    public bool HasChanges => Name != null || Mute != null || Volume != null; 
+    
+    public static AudioStreamDiff FromStreamInfo(AudioStreamInfo streamInfo)
+        => new(streamInfo.Id, streamInfo.Source, streamInfo.Name, streamInfo.Mute, streamInfo.Volume);
+}
+
+public record AudioStreamIncrementalSnapshot(AudioStreamDiff[] Updated, AudioStreamId[] Deleted);
 
 public interface IAudioStreamRepository
 {
-    Task UpdateAsync(BridgeAudioStream[] streams, CancellationToken cancellationToken);
+    event Func<AudioStreamIncrementalSnapshot, CancellationToken, Task> OnSnapshotChangedAsync;
+    
+    Task UpdateAsync(string agentId, BridgeAudioStream[] streams, CancellationToken cancellationToken);
     Task ClearAsync(string agentId, CancellationToken cancellationToken);
-    Task<byte[]> GetRgb565A8IconAsync(string id, string agentId, CancellationToken cancellationToken);
-    Task<AudioStreamState[]> GetAsync(bool onlyChanged, CancellationToken cancellationToken);
+    Task<AudioStreamInfo[]> GetAllAsync(CancellationToken cancellationToken);
 }
 
 public class AudioStreamRepository : IAudioStreamRepository
 {
+    private static readonly Comparer _comparer = new Comparer()
+        .WithEqualityComparer<double>((x, y) => Math.Abs(x - y) < 0.01);
+    
+    private readonly ILogger<AudioStreamRepository> _logger;
+    
     private readonly SemaphoreSlim _streamsLock = new(1, 1);
-    private readonly Dictionary<string, Dictionary<string, AudioStreamState>> _streams = new();
-    private readonly List<AudioStreamState> _changedStreams = [];
-    private readonly Dictionary<(string Id, string AgentId), byte[]> _rgb565A8Icons = new();
-    private bool _fullRefresh = true;
+    private readonly Dictionary<string, Dictionary<string, AudioStreamInfo>> _streams = new();
 
-    public async Task UpdateAsync(BridgeAudioStream[] streams, CancellationToken cancellationToken)
+    public AudioStreamRepository(ILogger<AudioStreamRepository> logger)
     {
+        _logger = logger;
+    }
+
+    public event Func<AudioStreamIncrementalSnapshot, CancellationToken, Task>? OnSnapshotChangedAsync;
+
+    public async Task UpdateAsync(string agentId, BridgeAudioStream[] streams, CancellationToken cancellationToken)
+    {
+        var diff = new List<AudioStreamDiff>();
+        var removed =  new List<AudioStreamId>();
+        
         await _streamsLock.WaitAsync(cancellationToken);
         try
         {
-            var keyStreams = streams
-                .GroupBy(x => x.AgentId)
-                .ToDictionary(x => x.Key, x => x.ToDictionary(y => y.Id, y => y));
+            if (!_streams.TryGetValue(agentId, out var agentStreams))
+                _streams[agentId] = agentStreams = [];
 
-            foreach (var agentId in keyStreams.Keys)
-            {
-                var agentStreams = _streams[agentId];
-                var newAgentStreams = keyStreams[agentId];
+            var bridgeAgentStreams = streams.ToDictionary(x => x.Id, x => x);
                 
-                foreach (var id in agentStreams.Keys.Where(id => !newAgentStreams.ContainsKey(id)))
-                {
-                    agentStreams.Remove(id);
-                    _fullRefresh = true;
-                }
-
-                foreach (var (id, stream) in newAgentStreams)
-                {
-                    if (agentStreams.TryGetValue(id, out var state))
-                    {
-                        if (state.Mute != stream.Mute || Math.Abs(state.Volume - stream.Volume) > 0.01 || state.Name != stream.Name)
-                        {
-                            agentStreams[id] = state with { Mute = stream.Mute, Volume = stream.Volume, Name = stream.Name };
-                            _changedStreams.Add(state);
-                        }
-                        continue;
-                    }
-                    
-                    var newState = new AudioStreamState(id, agentId, stream.Name, stream.Mute, stream.Volume);
-                    agentStreams.Add(id, newState);
-                    _rgb565A8Icons.Add((id, agentId), Rgb565A8Converter.Convert(stream.Icon.Name, stream.Icon.Icon));
-                    _changedStreams.Add(newState);
-                }
-            }
+            removed.AddRange(RemoveAgentStreams(agentId, agentStreams, bridgeAgentStreams));
+            diff.AddRange(UpdateAgentStreams(agentId, agentStreams, bridgeAgentStreams));
         }
         finally
         {
             _streamsLock.Release();
         }
+
+        await NotifyChangedAsync(diff, removed, cancellationToken);
     }
 
-    public async Task ClearAsync(string agentId, CancellationToken cancellationToken)
+    private async Task NotifyChangedAsync(IReadOnlyCollection<AudioStreamDiff> changed, IReadOnlyCollection<AudioStreamId> removed, CancellationToken cancellationToken)
     {
-        await _streamsLock.WaitAsync(cancellationToken);
-        try
-        {
-            _streams.Remove(agentId);
-        }
-        finally
-        {
-            _streamsLock.Release();
-        }
-    }
+        if (OnSnapshotChangedAsync == null || (changed.Count == 0 && removed.Count == 0))
+            return;
+        
+        var snapshot = new AudioStreamIncrementalSnapshot(changed.ToArray(), removed.ToArray());
 
-    public async Task<byte[]> GetRgb565A8IconAsync(string id, string agentId, CancellationToken cancellationToken)
-    {
-        await _streamsLock.WaitAsync(cancellationToken);
         try
         {
-            return _rgb565A8Icons.TryGetValue((id, agentId), out var icon) ? icon : [];
+            await OnSnapshotChangedAsync.InvokeAllAsync(snapshot, cancellationToken);
         }
-        finally
+        catch (Exception ex) when (ex is not TaskCanceledException and not OperationCanceledException)
         {
-            _streamsLock.Release();
+            _logger.LogError(ex, "Failed to notify about stream changes");
         }
     }
     
-    public async Task<AudioStreamState[]> GetAsync(bool onlyChanged, CancellationToken cancellationToken)
+    public async Task ClearAsync(string agentId, CancellationToken cancellationToken)
     {
+        var removed = new List<AudioStreamId>();
+        
         await _streamsLock.WaitAsync(cancellationToken);
         try
         {
-            if (!onlyChanged || _fullRefresh)
-                return _streams.Values.SelectMany(x => x.Values).ToArray();
-            
-            var result = _changedStreams.ToArray();
-            _changedStreams.Clear();
-            return result;
+            if (_streams.Remove(agentId, out var streams))
+                removed.AddRange(streams.Select(x => new AudioStreamId(x.Key, agentId)));
         }
         finally
         {
             _streamsLock.Release();
         }
+        
+        await NotifyChangedAsync([], removed, cancellationToken);
+    }
+
+    public async Task<AudioStreamInfo[]> GetAllAsync(CancellationToken cancellationToken)
+    {
+        await _streamsLock.WaitAsync(cancellationToken);
+        try
+        {
+            return _streams.Values.SelectMany(x => x.Values).ToArray();
+        }
+        finally
+        {
+            _streamsLock.Release();
+        }
+    }
+
+    private List<AudioStreamDiff> UpdateAgentStreams(string agentId, Dictionary<string,AudioStreamInfo> agentStreams, Dictionary<string, BridgeAudioStream> bridgeAudioStreams)
+    {
+        var diffs = new List<AudioStreamDiff>();
+        
+        foreach (var (id, stream) in bridgeAudioStreams)
+        {
+            if (agentStreams.TryGetValue(id, out var info))
+            {
+                if (TryGetAudioStreamDiff(info, stream, out var diff, out var updatedInfo))
+                {
+                    diffs.Add(diff);
+                    agentStreams[id] = updatedInfo;
+                }
+
+                continue;
+            }
+                    
+            var streamId = new AudioStreamId(id, agentId);
+            var newInfo = AudioStreamInfo.FromStream(streamId, stream);
+            var newDiff = new AudioStreamDiff(streamId, newInfo.Source, newInfo.Name, newInfo.Mute, newInfo.Volume);
+            
+            agentStreams.Add(id, newInfo);
+            diffs.Add(newDiff);
+            
+            //AddOrReplaceIcon(streamId, LvglImageConverter.ConvertToRgb565A8(stream.Icon.Name, stream.Icon.Icon));
+        }
+        
+        return diffs;
+    }
+
+    private static bool TryGetAudioStreamDiff(AudioStreamInfo info, BridgeAudioStream stream, out AudioStreamDiff diff, out AudioStreamInfo updatedInfo)
+    {
+        updatedInfo = null!;
+
+        diff = new AudioStreamDiff(
+            Id: info.Id,
+            Source: info.Source,
+            Name: _comparer.IsEquals(info.Name, stream.Name) ? null : stream.Name,
+            Mute: _comparer.IsEquals(info.Mute, stream.Mute) ? null : stream.Mute,
+            Volume: _comparer.IsEquals(info.Volume, stream.Volume) ? null : stream.Volume);
+        
+        if (!diff.HasChanges)
+            return false;
+
+        updatedInfo = info with
+        {
+            Name = stream.Name,
+            Mute = stream.Mute,
+            Volume = stream.Volume
+        };
+
+        return true;
+    }
+    
+    private List<AudioStreamId> RemoveAgentStreams(string agentId, Dictionary<string,AudioStreamInfo> currentAgentStreams, Dictionary<string, BridgeAudioStream> bridgeAudioStreams)
+    {
+        var removed = new List<AudioStreamId>();
+        var removedIds = currentAgentStreams.Keys.Where(x => !bridgeAudioStreams.ContainsKey(x));
+        
+        foreach (var id in removedIds)
+        {
+            var streamId = new AudioStreamId(id, agentId);
+            
+            currentAgentStreams.Remove(id);
+            removed.Add(streamId);
+        }
+
+        return removed;
     }
 }

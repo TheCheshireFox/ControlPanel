@@ -1,4 +1,9 @@
+using MessagePack;
+
 namespace ControlPanel.Bridge.Protocol;
 
-public record StreamsMessage(UartAudioStream[] Streams)
+[MessagePackObject(true)]
+public record UartStreamsMessage(
+    [property: Key("updated")] UartAudioStream[] Updated,
+    [property: Key("deleted")] UartAudioStreamId[] Deleted)
     : UartMessage(UartMessageType.Streams);

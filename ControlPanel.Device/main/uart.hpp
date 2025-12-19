@@ -1,19 +1,140 @@
 #pragma once
 
+#include <byteswap.h>
+
+#include <type_traits>
 #include <functional>
+#include <atomic>
 
 #include "driver/uart.h"
 
+#include "framer.hpp"
 #include "esp_utility.hpp"
+
+template<bool enabled>
+struct uart_lock_t
+{
+    static void init()
+    {
+        if constexpr (enabled)
+        {
+            esp_log_set_vprintf(locked_vprintf);
+        }
+    }
+
+    void lock() { if constexpr (enabled) { _sync.lock(); } }
+    void unlock() { if constexpr (enabled) { _sync.unlock(); } }
+
+private:
+    static int locked_vprintf(const char *fmt, va_list ap)
+    {
+        if (xPortInIsrContext()) {
+            return 0;
+        }
+
+        std::unique_lock lock{_sync};
+        return vprintf(fmt, ap);
+    }
+
+private:
+    inline static std::recursive_mutex _sync;
+};
+
+uart_lock_t<true> uart_lock;
+
+struct ack_waiter_t
+{
+    bool wait(uint16_t seq, uint32_t timeout_ms)
+    {
+        slot_t* slot = nullptr;
+        {
+            std::unique_lock lock{_sync};
+            for (auto& s: _slots)
+            {
+                if (s.free)
+                {
+                    s.free = false;
+                    s.seq = seq;
+                    s.waiter = xTaskGetCurrentTaskHandle();
+                    slot = &s;
+                    break;
+                }
+            }
+        }
+
+        if (slot == nullptr)
+            return false;
+        
+        uint32_t ack_seq = 0;
+        if (xTaskNotifyWait(0, 0xFFFFFFFF, &ack_seq, pdMS_TO_TICKS(timeout_ms)) && (uint16_t)ack_seq == seq)
+        {
+            return true;
+        }
+
+        {
+            std::unique_lock lock{_sync};
+            slot->reset();
+        }
+
+        return false;
+    }
+
+    void notify(uint16_t seq)
+    {
+        TaskHandle_t waiter = nullptr;
+        {
+            std::unique_lock lock{_sync};
+
+            for (auto& s: _slots)
+            {
+                if (!s.free && s.seq == seq)
+                {
+                    waiter = s.reset();
+                    break;
+                }
+            }
+        }
+
+        if (waiter)
+            xTaskNotify(waiter, (uint32_t)seq, eSetValueWithOverwrite);
+    }
+
+private:
+    struct slot_t
+    {
+        bool free = false;
+        uint16_t seq = 0;
+        TaskHandle_t waiter = nullptr;
+
+        TaskHandle_t reset()
+        {
+            auto w = waiter;
+
+            free = false;
+            seq = 0;
+            waiter = nullptr;
+
+            return w;
+        }
+    };
+
+    std::recursive_mutex _sync;
+    std::array<slot_t, 16> _slots = {};
+};
 
 class uart_t
 {
+    static constexpr char TAG[] = "UART";
+
+    static constexpr uint8_t MAGIC[] = {0x19, 0x16};
+    static constexpr size_t  MAX_FRAME = 32 * 1024;
+
 public:
-    uart_t(uart_port_t port, int buffer_size)
-        : _port(port)
+    uart_t(uart_port_t port, int buffer_size, int baud_rate)
+        : _port(port), _framer{MAGIC, MAX_FRAME}
     {
         const uart_config_t cfg = {
-            .baud_rate  = 115200,
+            .baud_rate  = baud_rate,
             .data_bits  = UART_DATA_8_BITS,
             .parity     = UART_PARITY_DISABLE,
             .stop_bits  = UART_STOP_BITS_1,
@@ -21,77 +142,112 @@ public:
             .source_clk = UART_SCLK_APB,
         };
 
-        // Configure UART0 params (baud etc.)
         uart_param_config(_port, &cfg);
-
-        // Keep the default pins used for boot/logging
-        uart_set_pin(_port,
-                    UART_PIN_NO_CHANGE,  // TX
-                    UART_PIN_NO_CHANGE,  // RX
-                    UART_PIN_NO_CHANGE,  // RTS
-                    UART_PIN_NO_CHANGE); // CTS
-
-        // Install driver with RX/TX buffers and an event queue
-        uart_driver_install(_port,
-                            buffer_size,    // rx buffer
-                            buffer_size,    // tx buffer
-                            20,                   // event queue size
-                            &_queue,
-                            ESP_INTR_FLAG_IRAM);                   // intr flags
+        uart_set_pin(_port, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+        uart_driver_install(_port, buffer_size, 0, 20, &_queue, ESP_INTR_FLAG_IRAM);
     }
 
-    void register_line_handler(std::function<void(const std::string&)> cb)
+    template<typename F>
+    void register_data_handler(F&& cb)
     {
-        _line_handler = std::move(cb);
+        _data_handler = std::move(cb);
     }
 
     void init(void)
     {
-        // Create task that handles RX "interrupts" via events
+        uart_lock.init();
         xTaskCreate(THIS_CALLBACK(this, uart_event_task), "uart_event_task", 4096, this, 10, NULL);
     }
 
-    inline void send_line(const std::string& s)
+    inline void send_data(std::span<uint8_t> data)
     {
-        uart_write_bytes(_port, s.c_str(), s.size());
-        const char nl = '\n';
-        uart_write_bytes(_port, &nl, 1);
+        frame_t frame{_seq_cnt++, frame_type_t::Data, data};
+
+        std::vector<uint8_t> bytes(_framer.calc_frame_size(data.size()));
+        _framer.to_bytes(bytes, frame);
+
+        for (int i = 0; i < 3; i++)
+        {
+            write_uart(bytes);
+            if (_ack_waiter.wait(frame.seq, 1000))
+            {
+                ESP_LOGD(TAG, "frame seq=%d ACKed", frame.seq);
+                break;
+            }
+        }
+
+        ESP_LOGE(TAG, "%s", "Unable to send frame, no reposne");
     }
 
 private:
+    void write_uart(std::span<uint8_t> bytes)
+    {
+        std::unique_lock lock{uart_lock};
+        uart_write_bytes(_port, bytes.data(), bytes.size());
+        uart_wait_tx_done(_port, pdMS_TO_TICKS(100));
+    }
+
     void uart_event_task()
     {
         uart_event_t event;
-        static uint8_t rx_buf[128];
-        static std::string line_acc;   // or your own C buffer + index
+        std::array<uint8_t, 1024> tmp{};
 
-        while (true)
+        while(true)
         {
-            if (xQueueReceive(_queue, &event, portMAX_DELAY))
+            if (xQueueReceive(_queue, &event, portMAX_DELAY) != pdTRUE)
+                continue;
+
+            switch (event.type)
             {
-                switch (event.type)
-                {
-                    case UART_DATA: {
-                        auto len = uart_read_bytes(_port, rx_buf, std::min(event.size, (size_t)sizeof(rx_buf)), pdMS_TO_TICKS(20));
-                        if (len <= 0)
-                            break;
+            case UART_DATA:
+            {
+                auto to_read = event.size;
+                while (to_read > 0) {
+                    auto chunk = std::min(to_read, tmp.size());
+                    auto got = uart_read_bytes(_port, tmp.data(), chunk, 0);
+                    if (got <= 0) break;
+                    to_read -= got;
 
-                        for (int i = 0; i < len; ++i)
+                    _framer.feed(tmp.data(), (size_t)got, [&](const frame_t& frame) {
+                        switch (frame.type)
                         {
-                            line_acc.push_back(rx_buf[i]);
-                            
-                            if (rx_buf[i] != '\n')
-                                continue;
+                            case frame_type_t::ACK:
+                                ESP_LOGD(TAG, "new frame ack seq=%d len=%d", frame.seq, frame.data.size());
+                                _ack_waiter.notify(frame.seq);
+                                
+                                break;
+                            case frame_type_t::Data:
+                                ESP_LOGD(TAG, "new frame data seq=%d len=%d", frame.seq, frame.data.size());
 
-                            if (_line_handler) _line_handler(line_acc);
-                            line_acc.clear();
+                                std::vector<uint8_t> ack(_framer.calc_frame_size(0));
+                                _framer.to_bytes(ack, frame_t{frame.seq, frame_type_t::ACK, {}});
+                                write_uart(ack);
+                                
+                                if (_data_handler) _data_handler(frame.data);
+                                
+                                break;
                         }
-                        break;
+                    });
                 }
+                break;
+            }
 
-                default:
-                    break;
-                }
+            case UART_FIFO_OVF:
+            case UART_BUFFER_FULL:
+                ESP_LOGW(TAG, "%s", "overflow");
+                uart_flush_input(_port);
+                xQueueReset(_queue);
+                _framer.reset();
+                break;
+
+            case UART_PARITY_ERR:
+            case UART_FRAME_ERR:
+                ESP_LOGW(TAG, "%s", "parity/frame error");
+                _framer.reset();
+                break;
+
+            default:
+                break;
             }
         }
     }
@@ -99,5 +255,9 @@ private:
 private:
     uart_port_t _port;
     QueueHandle_t _queue;
-    std::function<void(const std::string&)> _line_handler;
+    ack_waiter_t _ack_waiter;
+    uart_framer_t<sizeof(MAGIC)> _framer;
+    std::function<void(std::span<const uint8_t>)> _data_handler;
+
+    std::atomic<uint16_t> _seq_cnt = 0;
 };

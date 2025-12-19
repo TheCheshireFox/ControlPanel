@@ -1,6 +1,4 @@
 namespace ControlPanel.Protocol;
 
-public class StreamsMessage
-{
-    
-}
+public record StreamsMessage(BridgeAudioStream[] Streams)
+    : BridgeMessage(BridgeMessageType.Streams);

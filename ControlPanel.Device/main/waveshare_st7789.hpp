@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <type_traits>
+#include <mutex>
 
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
@@ -46,6 +47,8 @@ public:
 
     inline esp_err_t init()
     {
+        std::unique_lock lock{_sync};
+
         esp_err_t err;
 
         err = config_gpio();
@@ -61,6 +64,8 @@ public:
 
     inline void backlight(bool enable)
     {
+        std::unique_lock lock{_sync};
+
         if (_bl_gpio >= 0) {
             gpio_set_level((gpio_num_t)_bl_gpio, enable);
         }
@@ -68,6 +73,8 @@ public:
 
     inline void flush(lv_display_t *disp, const lv_area_t *area, lv_color16_t *color_p)
     {
+        std::unique_lock lock{_sync};
+
         LV_UNUSED(disp);
 
         uint16_t x0 = area->x1;
@@ -100,6 +107,8 @@ public:
 
     inline void register_flush_cb(lv_display_t* disp)
     {
+        std::unique_lock lock{_sync};
+
         lv_display_set_flush_cb(disp, lvgl_flush_cb);
         lv_display_set_user_data(disp, this);
     }
@@ -313,12 +322,13 @@ private:
 private:
     spi_host_device_t    _spi_host;
     spi_device_handle_t  _spi_dev;
-    int                  _cs_gpio;
-    int                  _dc_gpio;
-    int                  _rst_gpio;
-    int                  _bl_gpio;
-    uint32_t             _width;
-    uint32_t             _height;
-    int                  _spi_clock_hz;
-    orientation_t        _orientation;
+    const int            _cs_gpio;
+    const int            _dc_gpio;
+    const int            _rst_gpio;
+    const int            _bl_gpio;
+    const uint32_t       _width;
+    const uint32_t       _height;
+    const int            _spi_clock_hz;
+    const orientation_t  _orientation;
+    std::recursive_mutex _sync;
 };
