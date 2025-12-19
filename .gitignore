@@ -1,3 +1,4 @@
+.idea/
 bin/
 obj/
 /packages/
@@ -6,4 +7,5 @@ riderModule.iml
 ControlPanel.Device/.devcontainer/
 ControlPanel.Device/.vscode/
 ControlPanel.Device/build/
+ControlPanel.Device/main/build/
 ControlPanel.Device/managed_components/
