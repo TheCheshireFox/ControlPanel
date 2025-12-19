@@ -3,3 +3,7 @@ obj/
 /packages/
 riderModule.iml
 /_ReSharper.Caches/
+ControlPanel.Device/.devcontainer/
+ControlPanel.Device/.vscode/
+ControlPanel.Device/build/
+ControlPanel.Device/managed_components/
