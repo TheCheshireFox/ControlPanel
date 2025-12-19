@@ -62,13 +62,15 @@ public:
             if (it == _volume_list_items.end())
             {
                 ESP_LOGD(TAG, "add (%s, %s) name_sz=%d", id.id.c_str(), id.agent_id.c_str(), stream.name ? stream.name->sprite.size() : 0);
-                if (!stream.name || !stream.volume || !stream.mute)
+                if (stream.name && stream.volume && stream.mute)
+                {
+                    add_item(id, stream.source, *stream.name, *stream.volume, *stream.mute);
+                }
+                else
                 {
                     ESP_LOGE(TAG, "new stream missing information");
-                    continue;
                 }
 
-                add_item(id, stream.source, stream.name.value(), stream.volume.value(), stream.mute.value());
                 continue;
             }
 

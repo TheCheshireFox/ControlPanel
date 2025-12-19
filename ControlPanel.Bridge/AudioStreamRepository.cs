@@ -148,7 +148,7 @@ public class AudioStreamRepository : IAudioStreamRepository
         }
     }
 
-    private List<AudioStreamDiff> UpdateAgentStreams(string agentId, Dictionary<string,AudioStreamInfo> agentStreams, Dictionary<string, BridgeAudioStream> bridgeAudioStreams)
+    private List<AudioStreamDiff> UpdateAgentStreams(string agentId, Dictionary<string, AudioStreamInfo> agentStreams, Dictionary<string, BridgeAudioStream> bridgeAudioStreams)
     {
         var diffs = new List<AudioStreamDiff>();
         
@@ -171,8 +171,6 @@ public class AudioStreamRepository : IAudioStreamRepository
             
             agentStreams.Add(id, newInfo);
             diffs.Add(newDiff);
-            
-            //AddOrReplaceIcon(streamId, LvglImageConverter.ConvertToRgb565A8(stream.Icon.Name, stream.Icon.Icon));
         }
         
         return diffs;

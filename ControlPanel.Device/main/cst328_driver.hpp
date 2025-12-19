@@ -10,27 +10,12 @@
 
 #include "esp_utility.hpp"
 
-struct semaphore_t
-{
-    semaphore_t() : _s(xSemaphoreCreateRecursiveMutex()) { }
-    semaphore_t(semaphore_t&& other) : _s(other._s) { other._s = nullptr; }
-    semaphore_t(semaphore_t&) = delete;
-    semaphore_t(const semaphore_t&) = delete;
-
-    void lock() { if (_s != nullptr) xSemaphoreTakeRecursive(_s, portMAX_DELAY); }
-    void unlock() { if (_s != nullptr) xSemaphoreGiveRecursive(_s); }
-
-    ~semaphore_t() { if (_s != nullptr) vSemaphoreDelete(_s); }
-private:
-    SemaphoreHandle_t _s = nullptr;
-};
-
-typedef struct {
+struct touch_point_t {
     bool touched = false;
     uint32_t last_touch_ms = 0;
     uint16_t x = 1;
     uint16_t y = 1;
-} touch_point_t;
+};
 
 class cst328_driver_t {
     static constexpr char TAG[] = "CST328";
@@ -43,7 +28,6 @@ public:
     cst328_driver_t(i2c_port_t port, uint32_t clock, int sda, int scl, int interrupt = -1)
         : _port(port), _interrupt(interrupt != -1)
     {
-        
         if (interrupt != -1)
         {
             gpio_config_t int_conf = {};

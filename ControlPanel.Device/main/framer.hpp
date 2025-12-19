@@ -102,8 +102,8 @@ namespace framer::details
 
 enum frame_type_t : uint8_t
 {
-    Data = 0,
-    ACK = 1
+    data = 0,
+    ack = 1
 };
 
 struct frame_t
@@ -140,11 +140,11 @@ public:
         {
             static_assert(sizeof(val) == 1 || sizeof(val) == 2);
 
-            if (sizeof(val) == 1)
+            if constexpr (sizeof(val) == 1)
             {
                 buffer.emplace_back((uint8_t)val);
             }
-            else if (sizeof(val) == 2)
+            else if constexpr (sizeof(val) == 2)
             {
                 uint16_t sw = __bswap_16(val);
                 buffer.insert(buffer.end(), (uint8_t*)&sw, (uint8_t*)&sw + sizeof(sw));
@@ -191,7 +191,7 @@ public:
                 
                 case state_t::len:
                     read_value(data[i], _len_buf, _len, state_t::data,
-                        [&](auto v){ return _frame_type == frame_type_t::ACK || (v > 0 && v < _max_frame_size); });
+                        [&](auto v){ return _frame_type == frame_type_t::ack || (v > 0 && v < _max_frame_size); });
                     break;
                 
                 case state_t::data:
@@ -210,6 +210,7 @@ public:
                         if (crc != _crc16)
                         {
                             ESP_LOGE(TAG, "bad crc16 %d != %d", _crc16, crc);
+                            reset();
                             break;
                         }
 
@@ -296,7 +297,7 @@ public:
         
         _state = state_t::magic;
         _seq = 0;
-        _frame_type = frame_type_t::Data;
+        _frame_type = frame_type_t::data;
         _len = 0;
         _crc16 = 0;
     }
@@ -339,7 +340,7 @@ private:
     
     state_t _state = state_t::magic;
     seq_t _seq = 0;
-    frame_type_t _frame_type = frame_type_t::Data;
+    frame_type_t _frame_type = frame_type_t::data;
     len_t _len = 0;
     uint16_t _crc16 = 0;
 };

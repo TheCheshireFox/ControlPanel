@@ -36,6 +36,8 @@ struct bridge_audio_stream_id_t
     std::string id;
     std::string agent_id;
 };
+SIMPLE_CONVERT_TO_JSON(bridge_audio_stream_id_t, id, agent_id);
+SIMPLE_CONVERT_FROM_JSON(bridge_audio_stream_id_t, id, agent_id);
 
 struct name_sprite_t
 {
@@ -44,6 +46,7 @@ struct name_sprite_t
     int width;
     int height;
 };
+SIMPLE_CONVERT_FROM_JSON(name_sprite_t, name, sprite, width, height);
 
 struct bridge_audio_stream_t
 {
@@ -53,53 +56,50 @@ struct bridge_audio_stream_t
     std::optional<bool> mute;
     std::optional<float> volume;
 };
+SIMPLE_CONVERT_FROM_JSON(bridge_audio_stream_t, id, source, name, mute, volume);
 
 struct streams_message_t : public bridge_message_base_t<bridge_message_type_t::streams>
 {
     std::vector<bridge_audio_stream_t> updated;
     std::vector<bridge_audio_stream_id_t> deleted;
 };
+SIMPLE_CONVERT_FROM_JSON(streams_message_t, type, updated, deleted);
+
 struct icon_message_t : public bridge_message_base_t<bridge_message_type_t::icon>
 {
     std::string source;
     std::string agent_id;
+    int size;
     std::span<const uint8_t> icon;
 };
+SIMPLE_CONVERT_FROM_JSON(icon_message_t, type, source, agent_id, size, icon);
 
 struct set_mute_message_t : public bridge_message_base_t<bridge_message_type_t::set_mute>
 {
     bridge_audio_stream_id_t id;
     bool mute;
 };
+SIMPLE_CONVERT_TO_JSON(set_mute_message_t, type, id, mute);
 
 struct set_volume_message_t : public bridge_message_base_t<bridge_message_type_t::set_volume>
 {
     bridge_audio_stream_id_t id;
     float volume;
 };
+SIMPLE_CONVERT_TO_JSON(set_volume_message_t, type, id, volume);
 
 struct get_icon_message_t : public bridge_message_base_t<bridge_message_type_t::get_icon>
 {
     std::string source;
     std::string agent_id;
 };
+SIMPLE_CONVERT_TO_JSON(get_icon_message_t, type, source, agent_id);
 
 struct request_refresh_message_t : public bridge_message_base_t<bridge_message_type_t::request_refresh>
 {
 
 };
-
-SIMPLE_CONVERT_TO_JSON(bridge_audio_stream_id_t, id, agent_id);
 SIMPLE_CONVERT_TO_JSON(request_refresh_message_t, type);
-SIMPLE_CONVERT_TO_JSON(get_icon_message_t, type, source, agent_id);
-SIMPLE_CONVERT_TO_JSON(set_volume_message_t, id, type, volume);
-SIMPLE_CONVERT_TO_JSON(set_mute_message_t, id, type, mute);
-
-SIMPLE_CONVERT_FROM_JSON(bridge_audio_stream_id_t, id, agent_id);
-SIMPLE_CONVERT_FROM_JSON(name_sprite_t, name, sprite, width, height);
-SIMPLE_CONVERT_FROM_JSON(bridge_audio_stream_t, id, source, name, mute, volume);
-SIMPLE_CONVERT_FROM_JSON(streams_message_t, type, updated, deleted);
-SIMPLE_CONVERT_FROM_JSON(icon_message_t, type, icon, source, agent_id);
 
 namespace protocol::details
 {

@@ -10,19 +10,20 @@ namespace ControlPanel.Bridge;
 
 public class AgentAppIconProvider
 {
-    private readonly int _targetIconSize;
     private readonly int _targetAgentIconSize;
     private readonly Image<Rgba32> _emptyIcon;
 
     private Image<Rgba32> _agentIcon;
+    
+    public int IconSize { get; }
 
     public AgentAppIconProvider(int targetIconSize, int targetAgentIconSize)
     {
-        _targetIconSize = targetIconSize;
+        IconSize = targetIconSize;
         _targetAgentIconSize = targetAgentIconSize;
         
         _agentIcon = new Image<Rgba32>(targetAgentIconSize, targetAgentIconSize);
-        _emptyIcon = new Image<Rgba32>(_targetIconSize, _targetIconSize, new Rgba32(0, 0, 0, 0));
+        _emptyIcon = new Image<Rgba32>(IconSize, IconSize, new Rgba32(0, 0, 0, 0));
     }
 
     public void SetAgentIcon(byte[] iconRaw)
@@ -36,7 +37,7 @@ public class AgentAppIconProvider
         if (raw.Length == 0)
             return _emptyIcon.Clone();
         
-        var img = LoadSized(raw, _targetIconSize);
+        var img = LoadSized(raw, IconSize);
         img.Mutate(ctx =>
         {
             var pos = new Point(img.Width - _agentIcon.Width, img.Height - _agentIcon.Height);

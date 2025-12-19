@@ -66,7 +66,7 @@ public class BridgeCommandHandler : IBridgeCommandHandler
     {
         if (_audioStreamIconCache.TryGetIcon(source, agentId, out var icon))
         {
-            await _connection.SendMessageAsync(new UartIconMessage(source, agentId, icon), cancellationToken);
+            await _connection.SendMessageAsync(new UartIconMessage(source, agentId, icon.Size, icon.Icon), cancellationToken);
         }
         else
         {

@@ -15,7 +15,7 @@ public interface IAgentConnection
     Task SendAsync(BridgeMessage message, CancellationToken cancellationToken);
 }
 
-public class AgentConnection : IAgentConnection
+public sealed class AgentConnection : IAgentConnection, IDisposable
 {
     private readonly ILogger<AgentConnection> _logger;
     private readonly ITextWebSocketClient _ws;
@@ -85,7 +85,8 @@ public class AgentConnection : IAgentConnection
                 case BridgeMessageType.Icon:
                 {
                     var msg = doc.Deserialize<AudioStreamIconMessage>() ?? throw new JsonException($"Unable to parse {nameof(UartMessageType.Streams)} message");
-                    await _controllerConnection.SendMessageAsync(new UartIconMessage(msg.Source, AgentId, ToUartIcon(msg)), cancellationToken);
+                    var (size, icon) = ToUartIcon(msg);
+                    await _controllerConnection.SendMessageAsync(new UartIconMessage(msg.Source, AgentId, size, icon), cancellationToken);
                     break;
                 }
                 default:
@@ -99,14 +100,19 @@ public class AgentConnection : IAgentConnection
         }
     }
 
-    private byte[] ToUartIcon(AudioStreamIconMessage msg)
+    private (int Size, byte[] Icon) ToUartIcon(AudioStreamIconMessage msg)
     {
         using var appImg = _agentAppIconProvider.GetAgentAppIcon(msg.Icon);
         var icon = LvglImageConverter.ConvertToRgb565A8(appImg);
                     
         _logger.LogDebug("New icon: {Source}, size: {Size}", msg.Source, msg.Icon.Length);
-        _audioStreamIconCache.AddIcon(msg.Source, AgentId, icon);
+        _audioStreamIconCache.AddIcon(msg.Source, AgentId, new AudioCacheIcon(_agentAppIconProvider.IconSize, icon));
 
-        return icon;
+        return (_agentAppIconProvider.IconSize, icon);
+    }
+
+    public void Dispose()
+    {
+        _audioStreamIconCache.RemoveIcons(AgentId);
     }
 }

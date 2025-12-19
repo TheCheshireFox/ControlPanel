@@ -65,7 +65,9 @@ public class Program
         finally
         {
             if (connection != null)
-                await agentRegistry.RemoveAsync(connection, CancellationToken.None);
+                await agentRegistry.RemoveAsync(connection, applicationLifetime.ApplicationStopping);
+            
+            connection?.Dispose();
             
             logger.LogInformation("agent disconnected: {Id}", agentId);
         }

@@ -18,7 +18,6 @@
 
 #include "cst328_driver.hpp"
 #include "waveshare_st7789.hpp"
-#include "sdspi.hpp"
 #include "volume_display.hpp"
 #include "backlight_timer.hpp"
 #include "uart.hpp"
@@ -28,26 +27,27 @@
 
 static constexpr char TAG[] = "main";
 
-// --- SPI display (ST7789T3, write-only, CS tied low) ---
+// ST7789T3
 #define LCD_SPI_HOST   SPI3_HOST
 #define LCD_SPI_CLOCK  60 * 1000000
 #define PIN_LCD_MOSI   23
 #define PIN_LCD_SCLK   18
 #define PIN_LCD_CS     5
 #define PIN_LCD_DC     27
-#define PIN_LCD_RST    26    // shared with touch RST
-#define PIN_LCD_BL     25    // backlight control
+#define PIN_LCD_RST    26 // shared with touch RST
+#define PIN_LCD_BL     25
 #define LCD_WIDTH      240
 #define LCD_HEIGHT     320
 
-// --- Touch (CST328 via I2C) ---
+// CST328
 #define I2C_TOUCH_PORT    I2C_NUM_0
 #define I2C_TOUCH_FREQ_HZ 400000
 #define PIN_TOUCH_SDA  21
 #define PIN_TOUCH_SCL  22
-#define PIN_TOUCH_INT  4     // interrupt from touch controller
+#define PIN_TOUCH_RST  26 // shared with lcd RST
+#define PIN_TOUCH_INT  4
 
-// --- SD reader ---
+// SD
 #define SD_SPI_HOST SPI2_HOST
 #define SD_SCK      14
 #define SD_MISO     13
@@ -69,15 +69,13 @@ static std::optional<uart_t> uart;
 static void spi_bus_init(void)
 {
     spi_bus_config_t buscfg = {
-        .mosi_io_num = PIN_LCD_MOSI,   // 20
-        .miso_io_num = -1,             // not used
-        .sclk_io_num = PIN_LCD_SCLK,   // 19
+        .mosi_io_num = PIN_LCD_MOSI,
+        .miso_io_num = -1,
+        .sclk_io_num = PIN_LCD_SCLK,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
         .max_transfer_sz = LCD_WIDTH * LCD_HEIGHT * 2 + 8,
     };
-
-    // Use SPI2_HOST on ESP32-C6 for LCD
     ESP_ERROR_CHECK(spi_bus_initialize(SPI3_HOST, &buscfg, SPI_DMA_CH_AUTO));
 }
 
@@ -95,7 +93,7 @@ static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
     auto pt = cst328_driver->get_touch();
     auto touched = ((esp_timer_get_time() / 1000) - pt.last_touch_ms) < TOUCH_TIMEOUT_MS;
 
-    data->state   = touched ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+    data->state = touched ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
 
     switch (st7789_driver->orientation())
     {
@@ -190,7 +188,7 @@ void uart0_init(void)
         else if (icon_message_t* msg = std::get_if<icon_message_t>(&bmsg))
         {
             ESP_LOGD(TAG, "icon source=%s agent_id=%s sz=%d", msg->source.c_str(), msg->agent_id.c_str(), msg->icon.size());
-            volume_display->update_icon(msg->source, msg->agent_id, 32, 32, msg->icon); // TODO: get size from bridge
+            volume_display->update_icon(msg->source, msg->agent_id, msg->size, msg->size, msg->icon);
         }
     });
     
@@ -206,13 +204,13 @@ static lv_display_t* st7789_create_lvgl_display()
     const auto hor_res = st7789_driver->width();
     const auto ver_res = st7789_driver->height();
 
-    lv_display_t* disp = lv_display_create(hor_res, ver_res);
+    auto disp = lv_display_create(hor_res, ver_res);
     lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565);
 
     st7789_driver->register_flush_cb(disp);
 
     const size_t buf_bytes = hor_res * ver_res / 5 * LV_COLOR_FORMAT_GET_SIZE(LV_COLOR_FORMAT_RGB565);
-    lv_color_t* buf = static_cast<lv_color_t*>(heap_caps_malloc(buf_bytes, MALLOC_CAP_DMA));
+    auto buf = static_cast<lv_color_t*>(heap_caps_malloc(buf_bytes, MALLOC_CAP_DMA));
     configASSERT(buf);
 
     lv_display_set_buffers(disp, buf, nullptr, buf_bytes, LV_DISPLAY_RENDER_MODE_PARTIAL);

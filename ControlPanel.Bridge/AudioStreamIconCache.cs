@@ -6,10 +6,14 @@ namespace ControlPanel.Bridge;
 
 public interface IAudioStreamIconCache
 {
-    bool TryGetIcon(string source, string agentId, out byte[] icon);
-    void AddIcon(string source, string agentId, byte[] icon);
-    void RemoveIcon(string source, string agentId);
+    bool TryGetIcon(string source, string agentId, out AudioCacheIcon icon);
+    void AddIcon(string source, string agentId, AudioCacheIcon icon);
+    void RemoveIcons(string agentId);
+    
+    // TODO: remove on source delete
 }
+
+public record AudioCacheIcon(int Size, byte[] Icon);
 
 public class AudioStreamIconCache : IAudioStreamIconCache
 {
@@ -26,12 +30,18 @@ public class AudioStreamIconCache : IAudioStreamIconCache
         _cacheExpiry =  options.Value.CacheExpiry;
     }
 
-    public bool TryGetIcon(string source, string agentId, out byte[] icon)
+    public bool TryGetIcon(string source, string agentId, out AudioCacheIcon icon)
         => _iconCache.TryGetValue((source, agentId), out icon!);
 
-    public void AddIcon(string source, string agentId, byte[] icon)
-        => _iconCache.Set((source, agentId), icon, new MemoryCacheEntryOptions { SlidingExpiration = _cacheExpiry, Size = icon.Length });
+    public void AddIcon(string source, string agentId, AudioCacheIcon icon)
+        => _iconCache.Set((source, agentId), icon, new MemoryCacheEntryOptions { SlidingExpiration = _cacheExpiry, Size = icon.Icon.Length });
     
-    public void RemoveIcon(string source, string agentId)
-        => _iconCache.Remove((source, agentId));
+    public void RemoveIcons(string agentId)
+    {
+        foreach (var (s, a) in _iconCache.Keys.Cast<(string, string)>())
+        {
+            if (a == agentId)
+                _iconCache.Remove((s, a));
+        }
+    }
 }

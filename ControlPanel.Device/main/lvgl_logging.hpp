@@ -32,11 +32,14 @@ static void lvgl_init_logging() {
 
     lv_log_register_print_cb(+[](lv_log_level_t level, const char* buf)
     {
-        lvgl_log_rec_t rec;
-        rec.level = level;
+        lvgl_log_rec_t rec {
+            .level = level
+        };
+        
         auto sz = std::min((size_t)(sizeof(rec.buf) - 1), strlen(buf));
         memcpy(rec.buf, buf, sz);
         rec.buf[sz] = 0;
+        
         xQueueGenericSend(log_queue, &rec, pdMS_TO_TICKS(1000), queueSEND_TO_BACK);
     });
 }

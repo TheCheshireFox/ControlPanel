@@ -9,6 +9,7 @@
 #include "driver/uart.h"
 
 #include "framer.hpp"
+#include "ack_waiter.hpp"
 #include "esp_utility.hpp"
 
 template<bool enabled>
@@ -22,8 +23,8 @@ struct uart_lock_t
         }
     }
 
-    void lock() { if constexpr (enabled) { _sync.lock(); } }
-    void unlock() { if constexpr (enabled) { _sync.unlock(); } }
+    inline void lock() { if constexpr (enabled) { _sync.lock(); } }
+    inline void unlock() { if constexpr (enabled) { _sync.unlock(); } }
 
 private:
     static int locked_vprintf(const char *fmt, va_list ap)
@@ -40,87 +41,7 @@ private:
     inline static std::recursive_mutex _sync;
 };
 
-uart_lock_t<true> uart_lock;
-
-struct ack_waiter_t
-{
-    bool wait(uint16_t seq, uint32_t timeout_ms)
-    {
-        slot_t* slot = nullptr;
-        {
-            std::unique_lock lock{_sync};
-            for (auto& s: _slots)
-            {
-                if (s.free)
-                {
-                    s.free = false;
-                    s.seq = seq;
-                    s.waiter = xTaskGetCurrentTaskHandle();
-                    slot = &s;
-                    break;
-                }
-            }
-        }
-
-        if (slot == nullptr)
-            return false;
-        
-        uint32_t ack_seq = 0;
-        if (xTaskNotifyWait(0, 0xFFFFFFFF, &ack_seq, pdMS_TO_TICKS(timeout_ms)) && (uint16_t)ack_seq == seq)
-        {
-            return true;
-        }
-
-        {
-            std::unique_lock lock{_sync};
-            slot->reset();
-        }
-
-        return false;
-    }
-
-    void notify(uint16_t seq)
-    {
-        TaskHandle_t waiter = nullptr;
-        {
-            std::unique_lock lock{_sync};
-
-            for (auto& s: _slots)
-            {
-                if (!s.free && s.seq == seq)
-                {
-                    waiter = s.reset();
-                    break;
-                }
-            }
-        }
-
-        if (waiter)
-            xTaskNotify(waiter, (uint32_t)seq, eSetValueWithOverwrite);
-    }
-
-private:
-    struct slot_t
-    {
-        bool free = false;
-        uint16_t seq = 0;
-        TaskHandle_t waiter = nullptr;
-
-        TaskHandle_t reset()
-        {
-            auto w = waiter;
-
-            free = false;
-            seq = 0;
-            waiter = nullptr;
-
-            return w;
-        }
-    };
-
-    std::recursive_mutex _sync;
-    std::array<slot_t, 16> _slots = {};
-};
+uart_lock_t<CONFIG_LOG_MAXIMUM_LEVEL != ESP_LOG_NONE> uart_lock;
 
 class uart_t
 {
@@ -161,7 +82,7 @@ public:
 
     inline void send_data(std::span<uint8_t> data)
     {
-        frame_t frame{_seq_cnt++, frame_type_t::Data, data};
+        frame_t frame{_seq_cnt++, frame_type_t::data, data};
 
         std::vector<uint8_t> bytes(_framer.calc_frame_size(data.size()));
         _framer.to_bytes(bytes, frame);
@@ -211,16 +132,16 @@ private:
                     _framer.feed(tmp.data(), (size_t)got, [&](const frame_t& frame) {
                         switch (frame.type)
                         {
-                            case frame_type_t::ACK:
+                            case frame_type_t::ack:
                                 ESP_LOGD(TAG, "new frame ack seq=%d len=%d", frame.seq, frame.data.size());
                                 _ack_waiter.notify(frame.seq);
                                 
                                 break;
-                            case frame_type_t::Data:
+                            case frame_type_t::data:
                                 ESP_LOGD(TAG, "new frame data seq=%d len=%d", frame.seq, frame.data.size());
 
                                 std::vector<uint8_t> ack(_framer.calc_frame_size(0));
-                                _framer.to_bytes(ack, frame_t{frame.seq, frame_type_t::ACK, {}});
+                                _framer.to_bytes(ack, frame_t{frame.seq, frame_type_t::ack, {}});
                                 write_uart(ack);
                                 
                                 if (_data_handler) _data_handler(frame.data);
