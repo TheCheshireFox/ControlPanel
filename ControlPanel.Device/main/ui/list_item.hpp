@@ -20,14 +20,14 @@ public:
         std::unique_lock lock{lv_sync};
 
         _app_icon = {parent};
+        _mute_click_area = lv_obj_create(parent);
         _title = {parent};
-        _mute_icon = lv_img_create(parent);
         _slider = lv_slider_create(parent);
         _slider_label = lv_label_create(parent);
 
         lv_obj_add_style(_app_icon.img, app_style::app_icon_img, 0);
+        lv_obj_add_style(_mute_click_area, app_style::mute_click_area, 0);
         lv_obj_add_style(_title.img, app_style::title, 0);
-        lv_obj_add_style(_mute_icon, app_style::mute_img, 0);
         lv_obj_add_style(_slider, app_style::slider, LV_PART_MAIN | LV_PART_INDICATOR | LV_PART_KNOB);
         lv_obj_add_style(_slider_label, app_style::slider_label, 0);
 
@@ -38,27 +38,28 @@ public:
         lv_slider_set_range(_slider, 0, 100);
 
         lv_obj_add_flag(_app_icon.img, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_flag(_mute_click_area, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_flag(_title.img, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_flag(_mute_icon, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_flag(_slider_label, LV_OBJ_FLAG_CLICKABLE);
         
         lv_obj_add_event_cb(_slider, +[](lv_event_t* e)
         {
             auto slider = (lv_obj_t*)lv_event_get_target(e);
             auto label = (lv_obj_t*)lv_event_get_user_data(e);
-            auto value = lv_slider_get_value(slider);
-            lv_label_set_text(label, std::to_string(value).c_str());
+            update_slider_label(slider, label);
         }, LV_EVENT_VALUE_CHANGED, _slider_label);
 
         lv_obj_add_event_cb(_slider, on_volume_changed_raw, LV_EVENT_PRESSED, this);
         lv_obj_add_event_cb(_slider, on_volume_changed_raw, LV_EVENT_PRESSING, this);
         lv_obj_add_event_cb(_slider, on_volume_changed_raw, LV_EVENT_RELEASED, this);
         lv_obj_add_event_cb(_app_icon.img, on_mute_click_raw, LV_EVENT_CLICKED, this);
-        lv_obj_add_event_cb(_title.img, on_mute_click_raw, LV_EVENT_CLICKED, this);
-        lv_obj_add_event_cb(_mute_icon, on_mute_click_raw, LV_EVENT_CLICKED, this);
-        lv_obj_add_event_cb(_slider_label, on_mute_click_raw, LV_EVENT_CLICKED, this);
+        lv_obj_add_event_cb(_mute_click_area, on_mute_click_raw, LV_EVENT_CLICKED, this);
 
         set_grid_layout(parent);
+
+        lv_obj_update_layout(parent);
+        lv_area_t coords;
+        lv_obj_get_coords(_mute_click_area, &coords);
     }
 
     void set_app_image(lv_color_format_t format, uint32_t w, uint32_t h, std::span<const uint8_t> data)
@@ -75,7 +76,15 @@ public:
     {
         std::scoped_lock lock{lv_sync};
 
-        lv_img_set_src(_mute_icon, (_mute = mute) ? &audio_muted_16 : &audio_high_16);
+        _mute = mute;
+        if (_mute)
+        {
+            lv_label_set_text(_slider_label, "M");
+        }
+        else
+        {
+            update_slider_label(_slider, _slider_label);
+        }
     }
 
     void set_volume(int32_t value)
@@ -100,19 +109,37 @@ public:
     }
 
 private:
+    static void update_slider_label(lv_obj_t* slider, lv_obj_t* label)
+    {
+        auto value = lv_slider_get_value(slider);
+        lv_label_set_text(label, std::to_string(value).c_str());
+    }
+
     void set_grid_layout(lv_obj_t* list_item)
     {
-        static const int32_t cols[] = { LV_GRID_CONTENT, LV_GRID_FR(1), LV_GRID_CONTENT, LV_GRID_TEMPLATE_LAST }; 
+        static const int32_t cols[] = { 10, LV_GRID_CONTENT, LV_GRID_FR(1), LV_GRID_CONTENT, 10, LV_GRID_TEMPLATE_LAST }; 
         static const int32_t rows[] = { LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_TEMPLATE_LAST }; 
 
         lv_obj_set_grid_dsc_array(list_item, cols, rows);
         lv_obj_set_layout(list_item, LV_LAYOUT_GRID);
 
-        lv_obj_set_grid_cell(_app_icon.img, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_STRETCH, 0, 2);
-        lv_obj_set_grid_cell(_title.img, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_CENTER, 0, 1);
-        lv_obj_set_grid_cell(_mute_icon, LV_GRID_ALIGN_CENTER, 2, 1, LV_GRID_ALIGN_END, 0, 1);
-        lv_obj_set_grid_cell(_slider, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_CENTER, 1, 1);
-        lv_obj_set_grid_cell(_slider_label, LV_GRID_ALIGN_STRETCH, 2, 1, LV_GRID_ALIGN_END, 1, 1);
+        /*
+              0         1        2      3       4
+          +-------+----------+-------+-----+---------+
+        0 | click | app icon |    title    | <empty> |
+          |       |          +-------+-----+         |
+        1 |       |          | slider|label|         |
+          +-------+----------+-------+-----+---------+
+        */
+
+        // row 0
+        lv_obj_set_grid_cell(_mute_click_area, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_STRETCH, 0, 2);
+        lv_obj_set_grid_cell(_app_icon.img, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 0, 2);
+        lv_obj_set_grid_cell(_title.img, LV_GRID_ALIGN_STRETCH, 2, 2, LV_GRID_ALIGN_CENTER, 0, 1);
+        
+        // row 1
+        lv_obj_set_grid_cell(_slider, LV_GRID_ALIGN_STRETCH, 2, 1, LV_GRID_ALIGN_CENTER, 1, 1);
+        lv_obj_set_grid_cell(_slider_label, LV_GRID_ALIGN_STRETCH, 3, 1, LV_GRID_ALIGN_END, 1, 1);
     }
 
     static void on_mute_click_raw(lv_event_t* e)
@@ -145,6 +172,9 @@ private:
             {
                 that->_slider_editing = false;
                 auto value = lv_slider_get_value(slider);
+
+                if (that->_mute && that->_on_mute_changed)
+                    that->_on_mute_changed(false);
 
                 if (that->_on_volume_changed)
                     that->_on_volume_changed(value);
@@ -225,9 +255,9 @@ private:
     };
 
 private:
+    lv_obj_t* _mute_click_area;
     image_t _app_icon;
     image_t _title;
-    lv_obj_t* _mute_icon;
     lv_obj_t* _slider;
     lv_obj_t* _slider_label;
 

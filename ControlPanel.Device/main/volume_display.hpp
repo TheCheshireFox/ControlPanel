@@ -10,8 +10,6 @@
 
 #include "lvgl.h"
 #include "lv_sync.hpp"
-#include "images/audio_high_16.hpp"
-#include "images/audio_muted_16.hpp"
 
 #include "esp_utility.hpp"
 

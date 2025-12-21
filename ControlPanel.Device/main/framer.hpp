@@ -170,7 +170,7 @@ public:
     template <class F>
     void feed(const uint8_t* data, size_t n, F&& on_frame)
     {
-        if (n == 0 || n > _capacity)
+        if (n == 0)
             return;
 
         for (int i = 0; i < n; i++)

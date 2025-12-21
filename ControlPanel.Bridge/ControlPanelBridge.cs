@@ -41,7 +41,7 @@ public class ControlPanelBridge : BackgroundService
         var (updated, deleted) = snapshot.ToUartAudioStreams(_textRenderer);
         var msg = new UartStreamsMessage(updated, deleted);
         
-        _logger.LogInformation("Sending streams, updated: {Updated}, deleted: {Deleted}", updated.Length, deleted.Length);
+        _logger.LogDebug("Sending streams, updated: {Updated}, deleted: {Deleted}", updated.Length, deleted.Length);
         await _controllerConnection.SendMessageAsync(msg, cancellationToken);
     }
 

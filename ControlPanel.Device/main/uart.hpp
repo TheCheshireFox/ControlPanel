@@ -9,50 +9,32 @@
 #include "driver/uart.h"
 
 #include "framer.hpp"
-#include "ack_waiter.hpp"
+#include "buffer_queue.hpp"
 #include "esp_utility.hpp"
-
-template<bool enabled>
-struct uart_lock_t
-{
-    static void init()
-    {
-        if constexpr (enabled)
-        {
-            esp_log_set_vprintf(locked_vprintf);
-        }
-    }
-
-    inline void lock() { if constexpr (enabled) { _sync.lock(); } }
-    inline void unlock() { if constexpr (enabled) { _sync.unlock(); } }
-
-private:
-    static int locked_vprintf(const char *fmt, va_list ap)
-    {
-        if (xPortInIsrContext()) {
-            return 0;
-        }
-
-        std::unique_lock lock{_sync};
-        return vprintf(fmt, ap);
-    }
-
-private:
-    inline static std::recursive_mutex _sync;
-};
-
-uart_lock_t<CONFIG_LOG_MAXIMUM_LEVEL != ESP_LOG_NONE> uart_lock;
 
 class uart_t
 {
     static constexpr char TAG[] = "UART";
 
     static constexpr uint8_t MAGIC[] = {0x19, 0x16};
-    static constexpr size_t  MAX_FRAME = 32 * 1024;
+    static constexpr size_t MAX_FRAME = 32 * 1024;
+    static constexpr size_t MAX_TX_FRAME = 256;
+
+    static constexpr uint32_t SEND_QUEUE_SIZE = 8;
+
+    struct frame_data_t
+    {
+        uint16_t seq;
+        uint32_t retry_interval;
+        uint32_t retry_count;
+        frame_type_t type;
+        std::size_t data_size;
+        std::span<uint8_t> block;
+    };
 
 public:
-    uart_t(uart_port_t port, int buffer_size, int baud_rate)
-        : _port(port), _framer{MAGIC, MAX_FRAME}
+    uart_t(uart_port_t port, gpio_num_t tx, gpio_num_t rx, int buffer_size, int baud_rate)
+        : _port(port), _buffer_queue(MAX_TX_FRAME, SEND_QUEUE_SIZE), _framer{MAGIC, MAX_FRAME}
     {
         const uart_config_t cfg = {
             .baud_rate  = baud_rate,
@@ -63,9 +45,11 @@ public:
             .source_clk = UART_SCLK_APB,
         };
 
+        configASSERT(_send_queue = xQueueCreate(SEND_QUEUE_SIZE, sizeof(frame_data_t)));
+
         uart_param_config(_port, &cfg);
-        uart_set_pin(_port, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-        uart_driver_install(_port, buffer_size, 0, 20, &_queue, ESP_INTR_FLAG_IRAM);
+        uart_set_pin(_port, tx, rx, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+        uart_driver_install(_port, buffer_size, 0, 20, &_uart_rx_queue, ESP_INTR_FLAG_IRAM);
     }
 
     template<typename F>
@@ -76,36 +60,80 @@ public:
 
     void init(void)
     {
-        uart_lock.init();
         xTaskCreate(THIS_CALLBACK(this, uart_event_task), "uart_event_task", 4096, this, 10, NULL);
+        xTaskCreate(THIS_CALLBACK(this, uart_send_task), "uart_send_task", 4096, this, 10, &_send_task);
     }
 
-    inline void send_data(std::span<uint8_t> data)
+    inline void send_data(std::span<uint8_t> data, uint32_t retry_interval_ms = 1000, uint32_t retry_count = 3)
     {
-        frame_t frame{_seq_cnt++, frame_type_t::data, data};
+        auto frame_size = _framer.calc_frame_size(data.size());
 
-        std::vector<uint8_t> bytes(_framer.calc_frame_size(data.size()));
-        _framer.to_bytes(bytes, frame);
-
-        for (int i = 0; i < 3; i++)
+        if (frame_size > _buffer_queue.block_size())
         {
-            write_uart(bytes);
-            if (_ack_waiter.wait(frame.seq, 1000))
-            {
-                ESP_LOGD(TAG, "frame seq=%d ACKed", frame.seq);
-                break;
-            }
+            ESP_LOGE(TAG, "data too large sz=%d frame_sz=%d block_sz=%d", data.size(), frame_size, _buffer_queue.block_size());
+            return;
         }
+        
+        auto block = _buffer_queue.take();
+        std::copy_n(data.data(), data.size(), block.data());
 
-        ESP_LOGE(TAG, "%s", "Unable to send frame, no reposne");
+        frame_data_t frame_data{_seq_cnt++, retry_interval_ms, retry_count, frame_type_t::data, data.size(), block};
+        if (!xQueueSend(_send_queue, &frame_data, portMAX_DELAY))
+            ESP_LOGE(TAG, "%s", "Unable to enqueue frame");
     }
 
 private:
     void write_uart(std::span<uint8_t> bytes)
     {
-        std::unique_lock lock{uart_lock};
         uart_write_bytes(_port, bytes.data(), bytes.size());
-        uart_wait_tx_done(_port, pdMS_TO_TICKS(100));
+    }
+
+    void uart_send_task()
+    {
+        std::vector<uint8_t> bytes;
+        frame_data_t frame_data;
+
+        while (true)
+        {
+            if (!xQueueReceive(_send_queue, &frame_data, portMAX_DELAY))
+                continue;
+
+            frame_t frame{frame_data.seq, frame_data.type, frame_data.block.subspan(0, frame_data.data_size)};
+
+            auto need = _framer.calc_frame_size(frame.data.size());
+            if (bytes.capacity() < need)
+                bytes.reserve(need);
+
+            bytes.clear();
+            _framer.to_bytes(bytes, frame);
+
+            uint16_t i;
+            for (i = 0; i < frame_data.retry_count; i++)
+            {
+                write_uart(bytes);
+                
+                uint32_t ack_seq;
+                if (xTaskNotifyWait(0, 0xFFFFFFFF, &ack_seq, pdMS_TO_TICKS(frame_data.retry_interval)))
+                {
+                    if (ack_seq != frame_data.seq)
+                    {
+                        ESP_LOGW(TAG, "ack on different message seq=%d ack=%d", frame_data.seq, (uint16_t)ack_seq);
+                    }
+                    else
+                    {
+                        ESP_LOGD(TAG, "frame seq=%d ACKed", frame_data.seq);
+                        break;
+                    }
+                }
+            }
+
+            if (i == frame_data.retry_count)
+            {
+                ESP_LOGE(TAG, "%s", "Unable to send frame, no reposne");
+            }
+
+            _buffer_queue.give(frame_data.block);
+        }
     }
 
     void uart_event_task()
@@ -115,7 +143,7 @@ private:
 
         while(true)
         {
-            if (xQueueReceive(_queue, &event, portMAX_DELAY) != pdTRUE)
+            if (xQueueReceive(_uart_rx_queue, &event, portMAX_DELAY) != pdTRUE)
                 continue;
 
             switch (event.type)
@@ -134,8 +162,8 @@ private:
                         {
                             case frame_type_t::ack:
                                 ESP_LOGD(TAG, "new frame ack seq=%d len=%d", frame.seq, frame.data.size());
-                                _ack_waiter.notify(frame.seq);
-                                
+                                xTaskNotify(_send_task, (uint32_t)frame.seq, eSetValueWithOverwrite);
+
                                 break;
                             case frame_type_t::data:
                                 ESP_LOGD(TAG, "new frame data seq=%d len=%d", frame.seq, frame.data.size());
@@ -157,7 +185,7 @@ private:
             case UART_BUFFER_FULL:
                 ESP_LOGW(TAG, "%s", "overflow");
                 uart_flush_input(_port);
-                xQueueReset(_queue);
+                xQueueReset(_uart_rx_queue);
                 _framer.reset();
                 break;
 
@@ -175,8 +203,10 @@ private:
 
 private:
     uart_port_t _port;
-    QueueHandle_t _queue;
-    ack_waiter_t _ack_waiter;
+    QueueHandle_t _uart_rx_queue;
+    QueueHandle_t _send_queue;
+    buffer_queue_t _buffer_queue;
+    TaskHandle_t _send_task;
     uart_framer_t<sizeof(MAGIC)> _framer;
     std::function<void(std::span<const uint8_t>)> _data_handler;
 

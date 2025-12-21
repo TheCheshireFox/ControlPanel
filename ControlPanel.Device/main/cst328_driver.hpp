@@ -137,9 +137,7 @@ private:
                 _last_point = pt;
             }
 
-            if (_on_touch) {
-                _on_touch(pt);
-            }
+            if (_on_touch) _on_touch(pt);
         }
     }
 
@@ -182,7 +180,6 @@ private:
 
     esp_err_t cst328_read_xy_single(touch_point_t& pt)
     {
-        // read first point coordinates: 3 bytes at XY_REG+1
         uint8_t buf[3] = {0};
         auto err = cst328_reg_read(CST328_REG_XY + 1, buf, sizeof(buf));
         if (err != ESP_OK) {
@@ -192,10 +189,6 @@ private:
         uint8_t clear = 0;
         (void)cst328_reg_write(CST328_REG_NUM, &clear, 1);
 
-        // decode 12-bit X/Y from 3 bytes
-        //    matches:
-        //    x = (buf0 << 4) + ((buf2 & 0xF0) >> 4)
-        //    y = (buf1 << 4) + ( buf2 & 0x0F)
         uint16_t x = ((uint16_t)buf[0] << 4) | ((buf[2] & 0xF0) >> 4);
         uint16_t y = ((uint16_t)buf[1] << 4) |  (buf[2] & 0x0F);
 

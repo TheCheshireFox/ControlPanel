@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Channels;
+using ControlPanel.Shared;
 
 namespace ControlPanel.Bridge.Framer;
 
@@ -17,7 +18,7 @@ public interface IFrameProtocol
     IAsyncEnumerable<byte[]> ReadAsync(CancellationToken cancellationToken);
 }
 
-public class FrameProtocol : IFrameProtocol
+public sealed class FrameProtocol : IFrameProtocol, IAsyncDisposable
 {
     // ReSharper disable once InconsistentNaming
     private static readonly byte[] Magic = [0x19, 0x16];
@@ -27,24 +28,25 @@ public class FrameProtocol : IFrameProtocol
     private readonly ILogger<FrameProtocol> _logger;
     private readonly Framer _framer;
     private readonly Channel<Frame> _frames = Channel.CreateUnbounded<Frame>(new UnboundedChannelOptions { SingleWriter = true });
-    private readonly Task _readerTask;
+    private readonly CancellableTask _readerTask;
+    
+    private readonly List<byte> _uartLog = [];
     
     private readonly ConcurrentDictionary<ushort, TaskCompletionSource> _acks = new();
-    
-    private readonly SemaphoreSlim _nextSequenceLock = new (1, 1);
-    private ushort _nextSequence;
+
+    private ulong _nextSequence;
     
     public FrameProtocol(IFrameTransport transport, ILogger<FrameProtocol> logger)
     {
         _transport = transport;
         _logger = logger;
         _framer = new Framer(Magic, MaxFrameSize, logger);
-        _readerTask = Task.Run(async () => await ReaderTaskAsync(CancellationToken.None));
+        _readerTask = new CancellableTask(async ct => await ReaderTaskAsync(ct));
     }
 
     public async Task SendAsync(ReadOnlyMemory<byte> data, TimeSpan timeout, CancellationToken cancellationToken)
     {
-        var seq = await GetNextSequenceAsync(cancellationToken);
+        var seq = (ushort)Interlocked.Increment(ref _nextSequence);
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var frame = new Frame(seq, FrameType.Data, data.ToArray());
         
@@ -55,7 +57,7 @@ public class FrameProtocol : IFrameProtocol
         try
         {
             await tcs.Task.WaitAsync(timeout, cancellationToken);
-            _logger.LogInformation("Message {Sequence} ACKed by protocol", seq);
+            _logger.LogDebug("Message {Sequence} ACKed by protocol", seq);
         }
         finally
         {
@@ -68,21 +70,6 @@ public class FrameProtocol : IFrameProtocol
         await foreach (var frame in _frames.Reader.ReadAllAsync(cancellationToken))
             yield return frame.Data;
     }
-    
-    private readonly List<byte> _uartLog = [];
-
-    private void AppendUartLog(ReadOnlyMemory<byte> data)
-    {
-        _uartLog.AddRange(data.Span);
-
-        int nl;
-        while ((nl = _uartLog.IndexOf((byte)'\n')) != -1)
-        {
-            var str = Encoding.UTF8.GetString(_uartLog[..nl].Where(x => x >= 0x20).ToArray());
-            _logger.LogInformation("UART: {Line}", str);
-            _uartLog.RemoveRange(0, nl + 1);
-        }
-    }
 
     private async Task ReaderTaskAsync(CancellationToken cancellationToken)
     {
@@ -94,7 +81,8 @@ public class FrameProtocol : IFrameProtocol
             if (read <= 0)
                 continue;
 
-            AppendUartLog(buffer[..read]);
+            if (_logger.IsEnabled(LogLevel.Debug))
+                AppendUartLog(buffer[..read]);
             
             foreach (var frame in _framer.Append(buffer[..read]))
             {
@@ -103,16 +91,16 @@ public class FrameProtocol : IFrameProtocol
                     case FrameType.ACK:
                         if (_acks.TryRemove(frame.Sequence, out var tcs))
                         {
-                            _logger.LogInformation("ACK: sequence {Sequence} acked", frame.Sequence);
+                            _logger.LogDebug("sequence {Sequence} acked", frame.Sequence);
                             tcs.TrySetResult();
                         }
                         else
                         {
-                            _logger.LogWarning("ACK: sequence {Sequence} does not exist", frame.Sequence);
+                            _logger.LogWarning("sequence {Sequence} does not exist", frame.Sequence);
                         }
                         break;
                     case FrameType.Data:
-                        _logger.LogInformation("New frame, sequence: {Sequence}, type: {Type}, size: {Size}", frame.Sequence, frame.Type, frame.Data.Length);
+                        _logger.LogDebug("New frame, sequence: {Sequence}, type: {Type}, size: {Size}", frame.Sequence, frame.Type, frame.Data.Length);
                         await _transport.WriteAsync(_framer.ToBytes(new Frame(frame.Sequence, FrameType.ACK, [])), cancellationToken);
                         await _frames.Writer.WriteAsync(frame, cancellationToken);
                         break;
@@ -120,17 +108,22 @@ public class FrameProtocol : IFrameProtocol
             }
         }
     }
-    
-    private async Task<ushort> GetNextSequenceAsync(CancellationToken cancellationToken)
+
+    private void AppendUartLog(ReadOnlyMemory<byte> data)
     {
-        await _nextSequenceLock.WaitAsync(cancellationToken);
-        try
+        _uartLog.AddRange(data.Span);
+
+        int nl;
+        while ((nl = _uartLog.IndexOf((byte)'\n')) != -1)
         {
-            return _nextSequence++;
+            var str = Encoding.UTF8.GetString(_uartLog[..nl].Where(x => x >= 0x20).ToArray());
+            _logger.LogDebug("UART: {Line}", str);
+            _uartLog.RemoveRange(0, nl + 1);
         }
-        finally
-        {
-            _nextSequenceLock.Release();
-        }
+    }
+    
+    public async ValueTask DisposeAsync()
+    {
+        await _readerTask.DisposeAsync();
     }
 }

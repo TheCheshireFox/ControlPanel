@@ -55,7 +55,10 @@ static constexpr char TAG[] = "main";
 #define SD_CS       33
 
 #define UART_PORT       UART_NUM_0
+#define UART_TX         gpio_num_t(1) // 17
+#define UART_RX         gpio_num_t(3) // 16
 #define UART_BUF_SIZE   8096
+#define UART_BAUDRATE   921600
 
 #define BL_TIMER_LONG  uint64_t(3600 * 1000)
 #define BL_TIMER_SHORT uint64_t(30 * 1000)
@@ -169,7 +172,7 @@ static void lvgl_timer_init()
 
 void uart0_init(void)
 {
-    uart.emplace(UART_PORT, UART_BUF_SIZE, CONFIG_ESP_CONSOLE_UART_BAUDRATE);
+    uart.emplace(UART_PORT, UART_TX, UART_RX, UART_BUF_SIZE, UART_BAUDRATE);
     uart->register_data_handler(+[](std::span<const uint8_t> data)
     {
         backlight_timer->kick();
@@ -255,7 +258,7 @@ extern "C" void app_main(void)
     });
 
     uart0_init();
-    uart->send_data(serialize_bridge_message(request_refresh_message_t{}));
+    uart->send_data(serialize_bridge_message(request_refresh_message_t{}), 1000, std::numeric_limits<uint32_t>::max());
 
     ESP_LOGI(TAG, "Initialization completed");
 }

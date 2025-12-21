@@ -89,7 +89,7 @@ public sealed class Framer
 
     public byte[] ToBytes(Frame frame)
     {
-        _logger.LogInformation("Frame to bytes, seq={Sequence}, type={Type}, size={Size}", frame.Sequence, frame.Type, frame.Data.Length);
+        _logger.LogDebug("Frame to bytes, seq={Sequence}, type={Type}, size={Size}", frame.Sequence, frame.Type, frame.Data.Length);
         
         Span<byte> buffer = stackalloc byte[2];
         
@@ -98,19 +98,19 @@ public sealed class Framer
         
         BinaryPrimitives.WriteUInt16BigEndian(buffer, frame.Sequence);
         ms.Write(buffer);
-        //_logger.LogInformation("BE16 sequence {SequenceArray}", buffer.FormatString());
+        _logger.LogDebug("BE16 sequence {SequenceArray}", buffer.FormatString());
 
         ms.Write([(byte)frame.Type]);
         
         BinaryPrimitives.WriteUInt16BigEndian(buffer, (ushort)frame.Data.Length);
         ms.Write(buffer);
-        //_logger.LogInformation("BE16 size {SizeArray}", buffer.FormatString());
+        _logger.LogDebug("BE16 size {SizeArray}", buffer.FormatString());
         
         ms.Write(frame.Data);
         
         BinaryPrimitives.WriteUInt16BigEndian(buffer, Crc16Ccitt.Compute(ms.ToArray()));
         ms.Write(buffer);
-        //_logger.LogInformation("BE16 crc16 {Crc16Array}", buffer.FormatString());
+        _logger.LogDebug("BE16 crc16 {Crc16Array}", buffer.FormatString());
 
         return ms.ToArray();
     }

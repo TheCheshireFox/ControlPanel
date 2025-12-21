@@ -6,15 +6,8 @@
 #include "esp_log.h"
 #include "esp_err.h"
 
-#define ESP_ASSERT_LOG(x, tag, msg) ({\
-        if (unlikely(!x)) {\
-            ESP_LOGE(tag, "%s", msg);\
-            configASSERT(x);\
-        }\
-    })
-
 #define THIS_CALLBACK(that, fn) +[](void* a) {\
-    ESP_ASSERT_LOG(a, "CALLBACK", "'this' is null");\
+    if (!a) { ESP_LOGE("CALLBACK", "%s", "'this' is null"); configASSERT(a); }\
     ((decltype(that))a)->fn();\
 }
 

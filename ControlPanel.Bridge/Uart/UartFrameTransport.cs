@@ -2,22 +2,21 @@ using System.IO.Ports;
 using System.Text;
 using ControlPanel.Bridge.Framer;
 using ControlPanel.Bridge.Options;
+using ControlPanel.Shared;
 using Microsoft.Extensions.Options;
-using Nito.AsyncEx;
 
 namespace ControlPanel.Bridge.Uart;
 
-public sealed class UartFrameTransport : IFrameTransport, IDisposable
+public sealed class UartFrameTransport : IFrameTransport, IAsyncDisposable
 {
     private readonly string _device;
     private readonly int _baud;
-    private readonly int _reconnectInterval;
+    private readonly TimeSpan _reconnectInterval;
     private readonly ILogger<UartFrameTransport> _logger;
-    
-    private readonly AsyncLock _portLock = new();
-    private readonly AsyncLock _readLock = new();
-    private readonly AsyncLock _writeLock = new();
-    private SerialPort? _port;
+
+    private readonly SharedGrowOnlyBuffer _toSerial = new();
+    private readonly SharedGrowOnlyBuffer _fromSerial = new();
+    private readonly CancellableTask _serialLoop;
     
     public UartFrameTransport(IOptions<UartOptions> options, ILogger<UartFrameTransport> logger)
     {
@@ -25,94 +24,84 @@ public sealed class UartFrameTransport : IFrameTransport, IDisposable
         _baud = options.Value.BaudRate;
         _reconnectInterval = options.Value.ReconnectInterval;
         _logger = logger;
+        
+        _serialLoop = new CancellableTask(SerialLoopAsync);
     }
 
     public async Task WriteAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
     {
-        await WithStreamAsync(async s =>
-        {
-            using var @lock = await _writeLock.LockAsync(cancellationToken);
-            await s.WriteAsync(data, cancellationToken);
-            await s.FlushAsync(cancellationToken);
-            return 0;
-        }, cancellationToken);
+        await _toSerial.WriteAsync(data, cancellationToken);
     }
 
     public async Task<int> ReadAsync(Memory<byte> data, CancellationToken cancellationToken)
     {
-        return await WithStreamAsync(async s =>
-        {
-            using var @lock = await _readLock.LockAsync(cancellationToken);
-            return await s.ReadAsync(data, cancellationToken);
-        }, cancellationToken);
+        return await _fromSerial.ReadAsync(data, cancellationToken);
     }
 
-    private async Task<T> WithStreamAsync<T>(Func<Stream, Task<T>> func, CancellationToken cancellationToken)
+    private async Task SerialLoopAsync(CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
+            SerialPort? port = null;
+
             try
             {
-                var stream = await GetStreamAsync(cancellationToken);
-                return await func(stream);
+                port = new SerialPort(_device, _baud)
+                {
+                    Parity = Parity.None,
+                    DataBits = 8,
+                    StopBits = StopBits.One,
+                    Handshake = Handshake.None,
+                    Encoding = Encoding.UTF8,
+                    ReadTimeout = -1,
+                    WriteTimeout = -1
+                };
+            
+                port.Open();
+                var stream = port.BaseStream;
+
+                _logger.LogInformation("UART {Device} opened.", _device);
+
+                var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                Task[] tasks =
+                [
+                    Task.Run(async () => await ReadAsync(stream, cts.Token), cts.Token),
+                    Task.Run(async () => await WriteAsync(stream, cts.Token), cts.Token),
+                ];
+
+                await Task.WhenAny(tasks);
+                await cts.CancelAsync();
+                await Task.WhenAll(tasks).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
             }
             catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
             {
-                _logger.LogWarning(ex, "UART stream error.");
-                
-                using (await _portLock.LockAsync(cancellationToken))
-                {
-                    if (_port?.IsOpen is not true)
-                        _port = null;
-                }
+                _logger.LogWarning(ex, "UART {Device} error.", _device);
             }
+
+            port?.Dispose();
+            await Task.Delay(_reconnectInterval, cancellationToken);
         }
-        
-        throw new OperationCanceledException();
     }
-    
-    private async Task<Stream> GetStreamAsync(CancellationToken cancellationToken)
+
+    private async Task ReadAsync(Stream stream, CancellationToken cancellationToken)
+        => await ReadWriteLoopAsync(stream.ReadAsync, _fromSerial.WriteAsync, cancellationToken);
+
+    private async Task WriteAsync(Stream stream, CancellationToken cancellationToken)
+        => await ReadWriteLoopAsync(_toSerial.ReadAsync, stream.WriteAsync, cancellationToken);
+
+    private static async Task ReadWriteLoopAsync(Func<Memory<byte>, CancellationToken, ValueTask<int>> read, Func<ReadOnlyMemory<byte>, CancellationToken, ValueTask> write,
+        CancellationToken cancellationToken)
     {
-        using (await _portLock.LockAsync(cancellationToken))
+        Memory<byte> buffer = new byte[8192];
+        while (!cancellationToken.IsCancellationRequested)
         {
-            if (_port?.IsOpen ?? false)
-                return _port.BaseStream;
-
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                try
-                {
-                    _port = new SerialPort(_device, _baud)
-                    {
-                        Parity = Parity.None,
-                        DataBits = 8,
-                        StopBits = StopBits.One,
-                        Handshake = Handshake.None,
-                        Encoding = Encoding.UTF8,
-                        ReadTimeout = -1,
-                        WriteTimeout = -1
-                    };
-            
-                    _port.Open();
-            
-                    _logger.LogInformation("UART {Device} opened.", _device);
-            
-                    return _port.BaseStream;
-                }
-                catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
-                {
-                    _logger.LogWarning(ex, "UART {Device} error.", _device);
-                }
-
-                await Task.Delay(_reconnectInterval, cancellationToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
-            }
-            
-            throw new OperationCanceledException();
+            var count = await read(buffer, cancellationToken);
+            await write(buffer[..count], cancellationToken);
         }
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
-        _port?.Dispose();
+        await _serialLoop.DisposeAsync();
     }
 }
