@@ -11,6 +11,15 @@
     ((decltype(that))a)->fn();\
 }
 
+template<typename F>
+struct scoped_fn
+{
+    scoped_fn(F&& fn) : _fn(std::forward<F>(fn)) {}
+    ~scoped_fn() { _fn(); }
+private:
+    F _fn;
+};
+
 using esp_timer_ptr = std::unique_ptr<esp_timer_handle_t, void(*)(esp_timer_handle_t*)>;
 
 esp_timer_ptr make_esp_timer(const esp_timer_create_args_t& args)

@@ -60,8 +60,8 @@ public:
 
     void init(void)
     {
-        xTaskCreate(THIS_CALLBACK(this, uart_event_task), "uart_event_task", 4096, this, 10, NULL);
         xTaskCreate(THIS_CALLBACK(this, uart_send_task), "uart_send_task", 4096, this, 10, &_send_task);
+        xTaskCreate(THIS_CALLBACK(this, uart_event_task), "uart_event_task", 4096, this, 10, NULL);
     }
 
     inline void send_data(std::span<uint8_t> data, uint32_t retry_interval_ms = 1000, uint32_t retry_count = 3)
@@ -90,7 +90,7 @@ private:
 
     void uart_send_task()
     {
-        std::vector<uint8_t> bytes;
+        std::vector<uint8_t> bytes(MAX_TX_FRAME);
         frame_data_t frame_data;
 
         while (true)
@@ -99,10 +99,14 @@ private:
                 continue;
 
             frame_t frame{frame_data.seq, frame_data.type, frame_data.block.subspan(0, frame_data.data_size)};
+            scoped_fn give_data([&](){ _buffer_queue.give(frame_data.block); });
 
             auto need = _framer.calc_frame_size(frame.data.size());
             if (bytes.capacity() < need)
-                bytes.reserve(need);
+            {
+                ESP_LOGE(TAG, "send loop: data too large sz=%d frame_sz=%d buffer_sz=%d", frame.data.size(), need, bytes.capacity());
+                continue;
+            }
 
             bytes.clear();
             _framer.to_bytes(bytes, frame);
@@ -131,8 +135,6 @@ private:
             {
                 ESP_LOGE(TAG, "%s", "Unable to send frame, no reposne");
             }
-
-            _buffer_queue.give(frame_data.block);
         }
     }
 
