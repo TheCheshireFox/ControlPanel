@@ -9,21 +9,24 @@ using NAudio.CoreAudioApi.Interfaces;
 
 namespace ControlPanel.Agent.Windows;
 
-public sealed class WindowsAudioAgent : IAudioAgent, IDisposable
+internal sealed class WindowsAudioAgent : IAudioAgent, IDisposable
 {
+    private readonly IIconLocator _iconLocator;
+    
     private readonly SessionIdMapper _idMapper = new();
     private readonly Task _idMapperPruneTask;
     private readonly CancellationTokenSource _cts = new();
 
-    public WindowsAudioAgent()
+    public WindowsAudioAgent(IIconLocator iconLocator)
     {
+        _iconLocator = iconLocator;
         _idMapperPruneTask = Task.Run(PruneMapperAsync);
     }
 
     public Task<AudioAgentDescription> GetAudioAgentDescription()
     {
         return Task.FromResult(new AudioAgentDescription(
-            AgentIcon: ResourceLoader.Load("Assets/win-logo.svg").ReadAllBytes()
+            AgentIcon: ResourceLoader.Load("Assets/win-logo.svg", GetType().Assembly).ReadAllBytes()
         ));
     }
     
@@ -74,7 +77,7 @@ public sealed class WindowsAudioAgent : IAudioAgent, IDisposable
 
     public Task<AudioStreamIcon> GetAudioStreamIconAsync(string source, CancellationToken cancellationToken)
     {
-        return Task.FromResult(IconLocator.FindIcon(source));
+        return Task.FromResult(_iconLocator.FindIcon(source));
     }
 
     private async Task PruneMapperAsync()

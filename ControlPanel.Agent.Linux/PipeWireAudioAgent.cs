@@ -33,12 +33,12 @@ internal static class DictionaryExtension
         => props.TryGetValue(key, out var jsonValue) && jsonValue.TryGetValue<T>(out var value) ? value :  defaultValue;
 }
 
-public class PipeWireAudioAgent : IAudioAgent
+internal class PipeWireAudioAgent : IAudioAgent
 {
     public Task<AudioAgentDescription> GetAudioAgentDescription()
     {
         return Task.FromResult(new AudioAgentDescription(
-            AgentIcon: ResourceLoader.Load("Assets/linux-logo.svg").ReadAllBytes()
+            AgentIcon: ResourceLoader.Load("Assets/linux-logo.svg", GetType().Assembly).ReadAllBytes()
         ));
     }
 

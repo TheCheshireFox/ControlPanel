@@ -15,6 +15,7 @@ public class UartMessageSerializer
             UartMessageType.SetMute => MessagePackSerializer.Deserialize<UartSetMuteMessage>(data),
             UartMessageType.GetIcon => MessagePackSerializer.Deserialize<UartGetIconMessage>(data),
             UartMessageType.RequestRefresh => MessagePackSerializer.Deserialize<UartRequestRefreshMessage>(data),
+            UartMessageType.Log => MessagePackSerializer.Deserialize<UartLogMessage>(data),
             _ => throw new Exception($"Unable to deserialize unknown message {type}")
         };
     }

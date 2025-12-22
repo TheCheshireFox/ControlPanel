@@ -155,9 +155,9 @@ public:
 
         buffer.clear();
         buffer.insert(buffer.end(), _magic.data(), _magic.data() + _magic.size());
+        insert_num((uint16_t)frame.data.size());
         insert_num((uint16_t)frame.seq);
         insert_num((uint8_t)frame.type);
-        insert_num((uint16_t)frame.data.size());
         buffer.insert(buffer.end(), frame.data.begin(), frame.data.end());
         insert_num(framer::details::crc16_ccitt(buffer));
     }
@@ -181,17 +181,16 @@ public:
                     read_magic(data[i]);
                     break;
 
+                case state_t::len:
+                    read_value(data[i], _len_buf, _len, state_t::seq, [&](auto v){ return v < _max_frame_size; });
+                    break;
+
                 case state_t::seq:
                     read_value(data[i], _seq_buf, _seq, state_t::type);
                     break;
 
                 case state_t::type:
-                    read_value(data[i], _type_buf, _frame_type, state_t::len);
-                    break;
-                
-                case state_t::len:
-                    read_value(data[i], _len_buf, _len, state_t::data,
-                        [&](auto v){ return _frame_type == frame_type_t::ack || (v > 0 && v < _max_frame_size); });
+                    read_value(data[i], _type_buf, _frame_type, state_t::data);
                     break;
                 
                 case state_t::data:
@@ -202,9 +201,9 @@ public:
                     if (read_value(data[i], _crc16_buf, _crc16, state_t::magic))
                     {
                         auto crc = framer::details::crc16_ccitt(_magic_buf);
+                        crc = framer::details::crc16_ccitt(_len_buf, crc);
                         crc = framer::details::crc16_ccitt(_seq_buf, crc);
                         crc = framer::details::crc16_ccitt(_type_buf, crc);
-                        crc = framer::details::crc16_ccitt(_len_buf, crc);
                         crc = framer::details::crc16_ccitt(_data_buf, crc);
 
                         if (crc != _crc16)
@@ -237,7 +236,7 @@ public:
                 if (std::memcmp(_magic_buf.data(), _magic.data(), _magic.size()) == 0)
                 {
                     ESP_LOGD(TAG, "%s", "frame start detected");
-                    _state = state_t::seq;
+                    _state = state_t::len;
                 }
                 else
                 {

@@ -1,25 +1,8 @@
+using System.Buffers;
 using System.Buffers.Binary;
-using System.Text;
+using System.Diagnostics.CodeAnalysis;
 
 namespace ControlPanel.Bridge.Framer;
-
-public static class SpanExtensions
-{
-    public static string FormatString(this Span<byte> span)
-    {
-        var sb = new StringBuilder("[");
-        foreach (var b in span)
-        {
-            sb.Append(b.ToString("X2"));
-            sb.Append(", ");
-        }
-        
-        sb.Remove(sb.Length - 2, 2);
-        sb.Append(']');
-
-        return sb.ToString();
-    }
-}
 
 public enum FrameType : byte
 {
@@ -28,209 +11,140 @@ public enum FrameType : byte
     ACK = 1
 }
 
-public record Frame(ushort Sequence, FrameType Type, byte[] Data);
+public class Frame(ushort sequence = 0, FrameType type = FrameType.Undefined, byte[]? data = null)
+{
+    public readonly ushort Sequence = sequence;
+    public readonly FrameType Type = type;
+    public readonly byte[] Data = data ?? [];
+}
 
 // format magic + seq(u16) + type(u8) + len(u16) + data + crc16
 public sealed class Framer
 {
-    private readonly byte[] _magic;
+    private readonly Memory<byte> _magic;
+    private readonly Memory<byte> _magicFrameBuffer;
     private readonly ILogger _logger;
 
-    private class StateData
-    {
-        public required State State { get; set; }
-        public required MemoryBlock MagicBlock { get; init; }
-        public required MemoryBlock SequenceBlock { get; init; }
-        public required MemoryBlock TypeBlock { get; init; }
-        public required MemoryBlock LengthBlock { get; init; }
-        public required MemoryBlock BodyBlock { get; init; }
-        public required MemoryBlock Crc16Block { get; init; }
+    private readonly (FrameField Type, int Size)[] _frameFieldSizes;
 
-        public ushort Sequence;
-        public FrameType Type;
-        public ushort Length;
-        public ushort Crc16;
-
-        public void Reset()
-        {
-            State = State.Magic;
-            MagicBlock.Clear();
-            SequenceBlock.Clear();
-            TypeBlock.Clear();
-            LengthBlock.Clear();
-            BodyBlock.Clear();
-            Crc16Block.Clear();
-            Sequence = 0;
-            Type = FrameType.Undefined;
-            Length = 0;
-            Crc16 = 0;
-        }
-    }
-
-    private readonly StateData _state;
-
-    public Framer(byte[] magic, int maxFrameSize, ILogger logger)
+    public Framer(byte[] magic, ILogger logger)
     {
         _magic = magic;
+        _magicFrameBuffer = new Memory<byte>(new byte[magic.Length]);
         _logger = logger;
 
-        _state = new StateData()
-        {
-            State = State.Magic,
-            MagicBlock = new MemoryBlock(_magic.Length),
-            SequenceBlock = new MemoryBlock(sizeof(ushort)),
-            TypeBlock = new MemoryBlock(sizeof(FrameType)),
-            LengthBlock = new MemoryBlock(sizeof(ushort)),
-            BodyBlock = new MemoryBlock(maxFrameSize),
-            Crc16Block = new MemoryBlock(2),
-            Length = 0
-        };
+        _frameFieldSizes =
+        [
+            (FrameField.Magic, magic.Length),
+            (FrameField.Length, sizeof(ushort)),
+            (FrameField.Sequence, sizeof(ushort)),
+            (FrameField.Type, sizeof(FrameType)),
+            (FrameField.Data, 0), // dynamic
+            (FrameField.Crc16, sizeof(ushort)),
+        ];
     }
 
-    public byte[] ToBytes(Frame frame)
+    public int ToBytes(Frame frame, Memory<byte> dst)
     {
         _logger.LogDebug("Frame to bytes, seq={Sequence}, type={Type}, size={Size}", frame.Sequence, frame.Type, frame.Data.Length);
-        
+
+        var mem = dst;
         Span<byte> buffer = stackalloc byte[2];
         
-        var ms = new MemoryStream();
-        ms.Write(_magic);
+        Write(_magic.Span);
+        WriteUInt16BigEndian(buffer, (ushort)frame.Data.Length);
+        WriteUInt16BigEndian(buffer, frame.Sequence);
+        Write([(byte)frame.Type]);
+        Write(frame.Data);
+        WriteUInt16BigEndian(buffer, Crc16Ccitt.Compute(dst[..^mem.Length].Span));
         
-        BinaryPrimitives.WriteUInt16BigEndian(buffer, frame.Sequence);
-        ms.Write(buffer);
-        _logger.LogDebug("BE16 sequence {SequenceArray}", buffer.FormatString());
+        return dst.Length - mem.Length;
 
-        ms.Write([(byte)frame.Type]);
-        
-        BinaryPrimitives.WriteUInt16BigEndian(buffer, (ushort)frame.Data.Length);
-        ms.Write(buffer);
-        _logger.LogDebug("BE16 size {SizeArray}", buffer.FormatString());
-        
-        ms.Write(frame.Data);
-        
-        BinaryPrimitives.WriteUInt16BigEndian(buffer, Crc16Ccitt.Compute(ms.ToArray()));
-        ms.Write(buffer);
-        _logger.LogDebug("BE16 crc16 {Crc16Array}", buffer.FormatString());
+        void Write(Span<byte> src)
+        {
+            src.CopyTo(mem.Span);
+            mem = mem[src.Length..];
+        }
 
-        return ms.ToArray();
+        void WriteUInt16BigEndian(Span<byte> buffer, ushort value)
+        {
+            BinaryPrimitives.WriteUInt16BigEndian(buffer, value);
+            Write(buffer);
+        }
     }
+
+    public int GetFrameSize(int dataSize) => GetFrameSizeInternal(dataSize);
     
-    public IEnumerable<Frame> Append(ReadOnlyMemory<byte> data)
+    private int GetFrameSizeInternal(int dataSize, params FrameField[] exclude)
     {
-        for (var i = 0; i < data.Length; i++)
-        {
-            switch (_state.State)
-            {
-                case State.Magic:
-                    ReadMagic(data, i);
-                    break;
-                case State.Seq:
-                    ReadValue(data.Span[i], _state.SequenceBlock, ref _state.Sequence, State.Type);
-                    break;
-                case State.Type:
-                    ReadValue(data.Span[i], _state.TypeBlock, ref _state.Type, State.Length);
-                    break;
-                case State.Length:
-                    ReadValue(data.Span[i], _state.LengthBlock, ref _state.Length, State.Body, l => _state.Type == FrameType.ACK || l > 0 && l < _state.BodyBlock.MaxSize);
-                    break;
-                case State.Body:
-                    i += ReadBody(data, i) - 1;
-                    break;
-                case State.Crc16:
-                    if (ReadValue(data.Span[i], _state.Crc16Block, ref _state.Crc16, State.Magic))
-                    {
-                        var crc16 = Crc16Ccitt.Compute([_state.MagicBlock, _state.SequenceBlock, _state.TypeBlock, _state.LengthBlock, _state.BodyBlock]);
-                        if (crc16 == _state.Crc16)
-                        {
-                            var body = _state.BodyBlock.Span[.._state.BodyBlock.Count];
-                            yield return new Frame(_state.Sequence, _state.Type, body.ToArray());
-                        }
-                        else
-                        {
-                            _logger.LogError("bad crc {Expected} != {Calcualted}", _state.Crc16, crc16);
-                        }
-                        _state.Reset();
-                    }
-                    break;
-            }
-        }
+        return _frameFieldSizes.Where(x => !exclude.Contains(x.Type)).Sum(x => x.Size) + dataSize;
     }
 
-    private void ReadMagic(ReadOnlyMemory<byte> mem, int offset)
+    public bool TryParseFrame(ref SequenceReader<byte> reader, [NotNullWhen(true)] out Frame? frame)
     {
-        var span = mem.Span;
-        if (span[offset] == _magic[0])
+        frame = null;
+
+        SequenceReader<byte> frameReader;
+        while (true)
         {
-            _state.Reset();
-            _state.MagicBlock.Add(span[offset]);
-        }
-        else if (_state.MagicBlock.Count > 0)
-        {
-            _state.MagicBlock.Add(span[offset]);
-            if (!_state.MagicBlock.IsFull)
-                return;
+            if (!reader.TryAdvanceTo(_magic.Span[0], false))
+            {
+                reader.AdvanceToEnd();
+                return false;
+            }
             
-            if (_state.MagicBlock.Span.SequenceEqual(_magic))
+            if (!reader.TryCopyTo(_magicFrameBuffer.Span))
+                return false;
+
+            if (_magicFrameBuffer.Span.SequenceEqual(_magic.Span))
             {
-                _state.State = State.Seq;
+                frameReader = reader;
+                frameReader.Advance(_magic.Length);
+                break;
             }
-            else
-            {
-                _state.State = State.Magic;
-                ClearMagic();
-            }
+
+            reader.Advance(1);
         }
-    }
 
-    private bool ReadValue<T>(byte b, MemoryBlock mem, ref T result, State nextState, Func<T, bool>? validate = null)
-    {
-        mem.Add(b);
-
-        if (!mem.IsFull)
+        if (!frameReader.TryReadBigEndian(out var len))
+            return false;
+        
+        if (len + sizeof(ushort) + sizeof(FrameType) + sizeof(ushort) > frameReader.Remaining)
+            return false;
+        
+        if (!frameReader.TryReadBigEndian(out var seq))
+            return false;
+        
+        if (!frameReader.TryRead(out var type))
+            return false;
+        
+        if (!frameReader.TryReadExactBytes(len, out var frameData))
+            return false;
+        
+        if (!frameReader.TryReadBigEndian(out var crc16))
             return false;
 
-        result = mem.As<T>();
+        var frameCrc16 = Crc16Ccitt.Compute(reader, GetFrameSizeInternal(len, exclude: FrameField.Crc16));
+
+        reader = frameReader;
         
-        var valid = validate?.Invoke(result) ?? true;
-        if (!valid)
-            _logger.LogError("{State} is invalid", _state.State);
-        
-        _state.State = valid ? nextState : State.Magic;
-        return valid;
-    }
-    
-    private int ReadBody(ReadOnlyMemory<byte> mem, int offset)
-    {
-        var need = _state.Length - _state.BodyBlock.Count;
-        var toCopy = Math.Min(mem.Length - offset, need);
-        _state.BodyBlock.Add(mem.Span[offset..(offset + toCopy)]);
-
-        if (_state.BodyBlock.Count == _state.Length)
-            _state.State = State.Crc16;
-
-        return toCopy;
-    }
-    
-    private void ClearMagic()
-    {
-        if (_state.MagicBlock.Span[^1] == _magic[0])
+        if (frameCrc16 != crc16)
         {
-            _state.Reset();
-            _state.MagicBlock.Add(_magic[0]);
+            _logger.LogError("bad crc {Expected} != {Calculated}", frameCrc16, crc16);
+            return false;
         }
-        else
-        {
-            _state.Reset();
-        }
+
+        frame = new Frame(seq, (FrameType)type, frameData);
+        return true;
     }
 
-    private enum State
+    private enum FrameField
     {
         Magic,
-        Seq,
-        Type,
         Length,
-        Body,
+        Sequence,
+        Type,
+        Data,
         Crc16
     }
 }

@@ -50,6 +50,9 @@ public class BridgeCommandHandler : IBridgeCommandHandler
             case UartRequestRefreshMessage:
                 await SendAllStreamsAsync(cancellationToken);
                 break;
+            case UartLogMessage logMessage:
+                PrintLogs(logMessage);
+                break;
             default:
                 _logger.LogWarning("Unknown message type {Type}", message.Type);
                 break;
@@ -79,5 +82,15 @@ public class BridgeCommandHandler : IBridgeCommandHandler
         var streamsInfoAsDiff = (await _audioStreamRepository.GetAllAsync(cancellationToken)).Select(AudioStreamDiff.FromStreamInfo).ToArray();
         var (updated, deleted) = new AudioStreamIncrementalSnapshot(streamsInfoAsDiff, []).ToUartAudioStreams(_textRenderer);
         await _connection.SendMessageAsync(new UartStreamsMessage(updated, deleted), cancellationToken);
+    }
+
+    private void PrintLogs(UartLogMessage logMessage)
+    {
+        var lines = logMessage.Line
+            .Trim('\r')
+            .Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        
+        foreach (var line in lines)
+            _logger.LogInformation("UART > {Message}", line);
     }
 }

@@ -14,8 +14,6 @@
 
 class uart_t
 {
-    static constexpr char TAG[] = "UART";
-
     static constexpr uint8_t MAGIC[] = {0x19, 0x16};
     static constexpr size_t MAX_FRAME = 32 * 1024;
     static constexpr size_t MAX_TX_FRAME = 256;
@@ -33,6 +31,9 @@ class uart_t
     };
 
 public:
+    static constexpr char TAG[] = "UART";
+    static constexpr char SEND_TAG[] = "UART >>";
+
     uart_t(uart_port_t port, gpio_num_t tx, gpio_num_t rx, int buffer_size, int baud_rate)
         : _port(port), _buffer_queue(MAX_TX_FRAME, SEND_QUEUE_SIZE), _framer{MAGIC, MAX_FRAME}
     {
@@ -70,7 +71,7 @@ public:
 
         if (frame_size > _buffer_queue.block_size())
         {
-            ESP_LOGE(TAG, "data too large sz=%d frame_sz=%d block_sz=%d", data.size(), frame_size, _buffer_queue.block_size());
+            ESP_LOGE(SEND_TAG, "data too large sz=%d frame_sz=%d block_sz=%d", data.size(), frame_size, _buffer_queue.block_size());
             return;
         }
         
@@ -79,7 +80,7 @@ public:
 
         frame_data_t frame_data{_seq_cnt++, retry_interval_ms, retry_count, frame_type_t::data, data.size(), block};
         if (!xQueueSend(_send_queue, &frame_data, portMAX_DELAY))
-            ESP_LOGE(TAG, "%s", "Unable to enqueue frame");
+            ESP_LOGE(SEND_TAG, "%s", "Unable to enqueue frame");
     }
 
 private:
@@ -90,8 +91,11 @@ private:
 
     void uart_send_task()
     {
+        const std::size_t max_pending_acks = 64;
+
         std::vector<uint8_t> bytes(MAX_TX_FRAME);
         frame_data_t frame_data;
+        std::set<uint8_t> pending_acks;
 
         while (true)
         {
@@ -119,15 +123,28 @@ private:
                 uint32_t ack_seq;
                 if (xTaskNotifyWait(0, 0xFFFFFFFF, &ack_seq, pdMS_TO_TICKS(frame_data.retry_interval)))
                 {
-                    if (ack_seq != frame_data.seq)
-                    {
-                        ESP_LOGW(TAG, "ack on different message seq=%d ack=%d", frame_data.seq, (uint16_t)ack_seq);
-                    }
-                    else
+                    if (ack_seq == frame_data.seq)
                     {
                         ESP_LOGD(TAG, "frame seq=%d ACKed", frame_data.seq);
                         break;
                     }
+
+                    if (pending_acks.erase(ack_seq))
+                    {
+                        ESP_LOGD(TAG, "frame seq=%d ACKed", frame_data.seq);
+                        break;
+                    }
+
+                    if (ack_seq < frame_data.seq)
+                    {
+                        if (pending_acks.size() > max_pending_acks)
+                            pending_acks.clear();
+                        
+                        pending_acks.emplace(ack_seq);
+                        continue;
+                    }
+
+                    ESP_LOGW(TAG, "ack on different message seq=%d ack=%d", frame_data.seq, (uint16_t)ack_seq);
                 }
             }
 

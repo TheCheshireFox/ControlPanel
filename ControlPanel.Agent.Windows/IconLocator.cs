@@ -2,14 +2,26 @@ using System.Collections.Concurrent;
 using System.Drawing;
 using System.Drawing.Imaging;
 using ControlPanel.Agent.Shared;
+using Microsoft.Extensions.Logging;
 
 namespace ControlPanel.Agent.Windows;
 
-internal static class IconLocator
+public interface IIconLocator
 {
-    private static readonly ConcurrentDictionary<string, AudioStreamIcon> _iconCache = new();
-    
-    public static AudioStreamIcon FindIcon(string exePath)
+    AudioStreamIcon FindIcon(string exePath);
+}
+
+internal class IconLocator : IIconLocator
+{
+    private readonly ILogger<IconLocator> _logger;
+    private readonly ConcurrentDictionary<string, AudioStreamIcon> _iconCache = new();
+
+    public IconLocator(ILogger<IconLocator> logger)
+    {
+        _logger = logger;
+    }
+
+    public AudioStreamIcon FindIcon(string exePath)
     {
         try
         {
@@ -28,14 +40,16 @@ internal static class IconLocator
 
                     return new AudioStreamIcon(bytes);
                 }
-                catch
+                catch (Exception e)
                 {
+                    _logger.LogError(e, "Could not load icon {exePath}", exePath);
                     return AudioStreamIcon.Default;
                 }
             });
         }
-        catch
+        catch (Exception e)
         {
+            _logger.LogError(e, "Could not load icon {exePath}", exePath);
             return AudioStreamIcon.Default;
         }
     }

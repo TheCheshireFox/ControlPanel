@@ -21,6 +21,7 @@
 #include "volume_display.hpp"
 #include "backlight_timer.hpp"
 #include "uart.hpp"
+#include "uart_log_proto_forwarder.hpp"
 #include "lv_sync.hpp"
 #include "lvgl_logging.hpp"
 #include "protocol.hpp"
@@ -170,9 +171,16 @@ static void lvgl_timer_init()
     ESP_LOGI(TAG, "LVGL timer started");
 }
 
-void uart0_init(void)
+void uart_init(void)
 {
     uart.emplace(UART_PORT, UART_TX, UART_RX, UART_BUF_SIZE, UART_BAUDRATE);
+    uart->init();
+
+    ESP_LOGI(TAG, "UART initialized");
+}
+
+void uart_register_handler()
+{
     uart->register_data_handler(+[](std::span<const uint8_t> data)
     {
         backlight_timer->kick();
@@ -194,10 +202,6 @@ void uart0_init(void)
             volume_display->update_icon(msg->source, msg->agent_id, msg->size, msg->size, msg->icon);
         }
     });
-    
-    uart->init();
-
-    ESP_LOGI(TAG, "UART initialized");
 }
 
 static lv_display_t* st7789_create_lvgl_display()
@@ -225,6 +229,9 @@ static lv_display_t* st7789_create_lvgl_display()
 
 extern "C" void app_main(void)
 {
+    uart_init();
+    uart_log_proto_forwarder::init(&uart.value());
+
     ESP_LOGI(TAG, "Starting app_main...");
 
     panel_init();
@@ -257,7 +264,7 @@ extern "C" void app_main(void)
         }));
     });
 
-    uart0_init();
+    uart_register_handler();
     uart->send_data(serialize_bridge_message(request_refresh_message_t{}), 1000, std::numeric_limits<uint32_t>::max());
 
     ESP_LOGI(TAG, "Initialization completed");

@@ -52,19 +52,6 @@ public class ControllerConnection : IControllerConnection
 
     public async Task SendMessageAsync<T>(T message, CancellationToken cancellationToken) where T : UartMessage
     {
-        for (var i = 0; i < _retryCount; i++)
-        {
-            try
-            {
-                await _protocol.SendAsync(_serializer.Serialize(message), _timeout, cancellationToken);
-                return;
-            }
-            catch (TimeoutException)
-            {
-                await Task.Delay(_retryDelay, cancellationToken);
-            }
-        }
-        
-        throw new TimeoutException("The operation has timed out");
+        await _protocol.SendAsync(_serializer.Serialize(message), _timeout, _retryCount, _retryDelay, cancellationToken);
     }
 }

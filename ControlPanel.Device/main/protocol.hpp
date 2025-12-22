@@ -22,7 +22,8 @@ enum bridge_message_type_t : int8_t
     set_mute,
     icon,
     get_icon,
-    request_refresh
+    request_refresh,
+    log
 };
 
 template<bridge_message_type_t Type>
@@ -101,9 +102,16 @@ struct request_refresh_message_t : public bridge_message_base_t<bridge_message_t
 };
 SIMPLE_CONVERT_TO_JSON(request_refresh_message_t, type);
 
-namespace protocol::details
+struct log_message_t : public bridge_message_base_t<bridge_message_type_t::log>
+{
+    std::string line;
+};
+SIMPLE_CONVERT_TO_JSON(log_message_t, type, line);
+
+namespace protocol
 {
     inline static constexpr char TAG[] = "MSGPACK";
+    inline static constexpr char SERIALIZE_TAG[] = "MSGPACK SZ";
 }
 
 using bridge_message_t = std::variant<std::monostate, streams_message_t, icon_message_t>;
@@ -122,7 +130,7 @@ inline bridge_message_t parse_bridge_message(std::span<const uint8_t> msg_data)
         case bridge_message_type_t::icon:
             return doc.as<icon_message_t>();
         default:
-            ESP_LOGE(protocol::details::TAG, "Unsupported deserilize type: %d", type);
+            ESP_LOGE(protocol::TAG, "Unsupported deserilize type: %d", type);
             return {};
     }
 }
@@ -141,11 +149,11 @@ inline std::span<uint8_t> serialize_bridge_message(const T& message)
     
     if (!sz)
     {
-        ESP_LOGE(protocol::details::TAG, "%s", "serialization failed");
+        ESP_LOGE(protocol::SERIALIZE_TAG, "%s", "serialization failed");
         return {writer.data(), 0};
     }
 
-    ESP_LOGD(protocol::details::TAG, "serialized to sz=%d", sz);
+    ESP_LOGD(protocol::SERIALIZE_TAG, "serialized to sz=%d", sz);
 
     return {writer.data(), sz};
 }

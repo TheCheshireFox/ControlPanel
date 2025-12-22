@@ -8,4 +8,5 @@ public enum UartMessageType
     Icon,
     GetIcon,
     RequestRefresh,
+    Log
 }

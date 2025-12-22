@@ -1,5 +1,4 @@
-﻿using System.Diagnostics;
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text;
 using ControlPanel.Agent.Linux;
 using ControlPanel.Agent.Options;
@@ -41,14 +40,14 @@ public class Program
             loggingBuilder.AddConsoleFormatter<TemplateConsoleFormatter, TemplateConsoleFormatterOptions>();
         });
         
-        AddFileLogging(builder);
-        
-        if (OperatingSystem.IsWindows())
-            LoggerProviderOptions.RegisterProviderOptions<EventLogSettings, EventLogLoggerProvider>(builder.Services);
+        AddWindowsLogging(builder);
 
+        var initializer = CreateAudioAgentSystemInitializer();
+        initializer.AddServices(builder.Services);
+        
         builder.Services.AddSingleton<IWebSocketFactory, WebSocketFactory>();
         builder.Services.AddSingleton<ITextWebSocketClientFactory, TextWebSocketClientFactory>();
-        builder.Services.AddSingleton(CreateAudioAgent());
+        builder.Services.AddSingleton<TextWebSocketClient>();
         builder.Services.AddHostedService<AgentService>();
         
         var host = builder.Build();
@@ -65,20 +64,22 @@ public class Program
         CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.InvariantCulture;
     }
     
-    private static IAudioAgent CreateAudioAgent()
+    private static IAudioAgentSystemInitializer CreateAudioAgentSystemInitializer()
     {
         return Environment.OSVersion.Platform switch
         {
-            PlatformID.Unix => new PipeWireAudioAgent(),
-            PlatformID.Win32NT or PlatformID.Win32S or PlatformID.Win32Windows or PlatformID.WinCE => new WindowsAudioAgent(),
+            PlatformID.Unix => new LinuxAudioAgentSystemInitializer(),
+            PlatformID.Win32NT or PlatformID.Win32S or PlatformID.Win32Windows or PlatformID.WinCE => new WindowsAudioAgentSystemInitializer(),
             _ => throw new NotSupportedException("Operation system not supported")
         };
     }
 
-    private static void AddFileLogging(HostApplicationBuilder builder)
+    private static void AddWindowsLogging(HostApplicationBuilder builder)
     {
         if (!OperatingSystem.IsWindows())
             return;
+        
+        LoggerProviderOptions.RegisterProviderOptions<EventLogSettings, EventLogLoggerProvider>(builder.Services);
         
         var dir = Path.Combine(ConfigPathProvider.AppDir, "logs");
         Log.Logger = new LoggerConfiguration()

@@ -1,5 +1,6 @@
 using System.IO.Ports;
 using System.Text;
+using System.Threading.Channels;
 using ControlPanel.Bridge.Framer;
 using ControlPanel.Bridge.Options;
 using ControlPanel.Shared;
@@ -13,10 +14,10 @@ public sealed class UartFrameTransport : IFrameTransport, IAsyncDisposable
     private readonly int _baud;
     private readonly TimeSpan _reconnectInterval;
     private readonly ILogger<UartFrameTransport> _logger;
-
-    private readonly SharedGrowOnlyBuffer _toSerial = new();
-    private readonly SharedGrowOnlyBuffer _fromSerial = new();
     private readonly CancellableTask _serialLoop;
+
+    private readonly BlockingQueue<MemoryRentBlock> _fromSerial = new();
+    private readonly Channel<MemoryRentBlock> _toSerial = Channel.CreateUnbounded<MemoryRentBlock>(new UnboundedChannelOptions{ SingleReader = true });
     
     public UartFrameTransport(IOptions<UartOptions> options, ILogger<UartFrameTransport> logger)
     {
@@ -28,16 +29,37 @@ public sealed class UartFrameTransport : IFrameTransport, IAsyncDisposable
         _serialLoop = new CancellableTask(SerialLoopAsync);
     }
 
-    public async Task WriteAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
+    public async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken)
     {
-        await _toSerial.WriteAsync(data, cancellationToken);
+        var count = 0;
+        
+        await _fromSerial.TakeOrReplaceAsync(block =>
+        {
+            count = Math.Min(buffer.Length, block.Data.Length);
+            block.Data[..count].CopyTo(buffer);
+
+            if (count > buffer.Length)
+                return block with { Data = block.Data[count..] };
+            
+            block.Dispose();
+            return null;
+
+        }, cancellationToken);
+
+        return count;
     }
 
-    public async Task<int> ReadAsync(Memory<byte> data, CancellationToken cancellationToken)
+    public async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken)
     {
-        return await _fromSerial.ReadAsync(data, cancellationToken);
-    }
+        var block = new MemoryRentBlock(buffer.Length);
+        using var disposables = new Disposables(block);
 
+        buffer.CopyTo(block.Data);
+        await _toSerial.Writer.WriteAsync(block, cancellationToken);
+        
+        disposables.Detach();
+    }
+    
     private async Task SerialLoopAsync(CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
@@ -71,7 +93,7 @@ public sealed class UartFrameTransport : IFrameTransport, IAsyncDisposable
 
                 await Task.WhenAny(tasks);
                 await cts.CancelAsync();
-                await Task.WhenAll(tasks).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                await Task.WhenAll(tasks); // will throw
             }
             catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
             {
@@ -84,19 +106,31 @@ public sealed class UartFrameTransport : IFrameTransport, IAsyncDisposable
     }
 
     private async Task ReadAsync(Stream stream, CancellationToken cancellationToken)
-        => await ReadWriteLoopAsync(stream.ReadAsync, _fromSerial.WriteAsync, cancellationToken);
-
-    private async Task WriteAsync(Stream stream, CancellationToken cancellationToken)
-        => await ReadWriteLoopAsync(_toSerial.ReadAsync, stream.WriteAsync, cancellationToken);
-
-    private static async Task ReadWriteLoopAsync(Func<Memory<byte>, CancellationToken, ValueTask<int>> read, Func<ReadOnlyMemory<byte>, CancellationToken, ValueTask> write,
-        CancellationToken cancellationToken)
     {
-        Memory<byte> buffer = new byte[8192];
         while (!cancellationToken.IsCancellationRequested)
         {
-            var count = await read(buffer, cancellationToken);
-            await write(buffer[..count], cancellationToken);
+            var block = new MemoryRentBlock(2048);
+            using var disposables = new Disposables(block);
+
+            var read = await stream.ReadAsync(block.Data, cancellationToken);
+            if (read <= 0)
+                return;
+
+            await _fromSerial.EnqueueAsync(block, cancellationToken);
+            
+            disposables.Detach();
+        }
+    }
+
+    private async Task WriteAsync(Stream stream, CancellationToken cancellationToken)
+    {
+        await foreach (var block in _toSerial.Reader.ReadAllAsync(cancellationToken))
+        {
+            using (block)
+            {
+                await stream.WriteAsync(block.Data, cancellationToken);
+                await stream.FlushAsync(cancellationToken);
+            }
         }
     }
 
