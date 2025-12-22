@@ -11,7 +11,7 @@ public static class AudioStreamIncrementalSnapshotExtensions
             .Select(x => new UartAudioStream(new UartAudioStreamId(x.Id.Id, x.Id.AgentId), x.Source, CreateTextSprite(x.Name, textRenderer), x.Mute, x.Volume))
             .ToArray();
 
-        var uartDeleted = snapshot.Deleted.Select(x => new UartAudioStreamId(x.Id, x.AgentId)).ToArray();
+        var uartDeleted = snapshot.Deleted.Select(x => new UartAudioStreamId(x.Id.Id, x.Id.AgentId)).ToArray();
         
         return (uartUpdated, uartDeleted);
     }

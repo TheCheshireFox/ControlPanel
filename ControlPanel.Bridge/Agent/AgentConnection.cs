@@ -1,10 +1,6 @@
-using System.Text;
 using System.Text.Json;
-using ControlPanel.Bridge.Extensions;
 using ControlPanel.Bridge.Protocol;
 using ControlPanel.Protocol;
-using ControlPanel.Shared;
-using ControlPanel.Shared.Extensions;
 using ControlPanel.WebSocket;
 
 namespace ControlPanel.Bridge.Agent;
@@ -40,6 +36,8 @@ public sealed class AgentConnection : IAgentConnection, IDisposable
         _audioStreamIconCache = audioStreamIconCache;
         _controllerConnection = controllerConnection;
         _logger = logger;
+
+        _audioStreamRepository.OnSnapshotChangedAsync += SnapshotChangedAsync;
     }
     
     public async Task HandleAgentAsync(CancellationToken cancellationToken)
@@ -111,8 +109,22 @@ public sealed class AgentConnection : IAgentConnection, IDisposable
         return (_agentAppIconProvider.IconSize, icon);
     }
 
+    private Task SnapshotChangedAsync(AudioStreamIncrementalSnapshot snapshot, CancellationToken cancellationToken)
+    {
+        var deletedSources = snapshot.Deleted
+            .Where(x => x.Id.AgentId == AgentId)
+            .Select(x => x.Source)
+            .Distinct();
+        
+        foreach (var source in deletedSources)
+            _audioStreamIconCache.RemoveIcon(source, AgentId);
+        
+        return Task.CompletedTask;
+    }
+    
     public void Dispose()
     {
+        _audioStreamRepository.OnSnapshotChangedAsync -= SnapshotChangedAsync;
         _audioStreamIconCache.RemoveIcons(AgentId);
     }
 }

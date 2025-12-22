@@ -1,6 +1,7 @@
 using System.IO.Ports;
 using System.Text;
 using System.Threading.Channels;
+using ControlPanel.Bridge.Extensions;
 using ControlPanel.Bridge.Framer;
 using ControlPanel.Bridge.Options;
 using ControlPanel.Shared;
@@ -18,6 +19,8 @@ public sealed class UartFrameTransport : IFrameTransport, IAsyncDisposable
 
     private readonly BlockingQueue<MemoryRentBlock> _fromSerial = new();
     private readonly Channel<MemoryRentBlock> _toSerial = Channel.CreateUnbounded<MemoryRentBlock>(new UnboundedChannelOptions{ SingleReader = true });
+    
+    public event Func<CancellationToken, Task>? OnReconnectedAsync;
     
     public UartFrameTransport(IOptions<UartOptions> options, ILogger<UartFrameTransport> logger)
     {
@@ -82,6 +85,8 @@ public sealed class UartFrameTransport : IFrameTransport, IAsyncDisposable
                 port.Open();
                 var stream = port.BaseStream;
 
+                await OnReconnectedAsync.InvokeAllAsync(cancellationToken);
+                
                 _logger.LogInformation("UART {Device} opened.", _device);
 
                 var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

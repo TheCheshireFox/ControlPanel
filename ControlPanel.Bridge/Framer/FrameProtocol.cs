@@ -8,6 +8,8 @@ namespace ControlPanel.Bridge.Framer;
 
 public interface IFrameTransport
 {
+    event Func<CancellationToken, Task> OnReconnectedAsync;
+    
     ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken);
     ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken);
 }
@@ -41,6 +43,7 @@ public sealed class FrameProtocol : IFrameProtocol, IAsyncDisposable
         _framer = new Framer(Magic, logger);
         
         _readerTask = new CancellableTask(async ct => await TransportReaderTaskAsync(ct));
+        _transport.OnReconnectedAsync += OnReconnectedAsync;
     }
 
     public async Task SendAsync(ReadOnlyMemory<byte> data, TimeSpan timeout, int retryCount, TimeSpan retryDelay, CancellationToken cancellationToken)
@@ -152,33 +155,10 @@ public sealed class FrameProtocol : IFrameProtocol, IAsyncDisposable
             switch (frame.Type)
             {
                 case FrameType.ACK:
-                    if (_acks.TryRemove(frame.Sequence, out var tcs))
-                    {
-                        _logger.LogDebug("Sequence {Sequence} acked", frame.Sequence);
-                        tcs.TrySetResult();
-                    }
-                    else
-                    {
-                        _logger.LogWarning("Sequence {Sequence} does not exist", frame.Sequence);
-                    }
+                    ProcessAckFrame(frame);
                     break;
                 case FrameType.Data:
-                    _logger.LogDebug("New frame, sequence: {Sequence}, type: {Type}, size: {Size}", frame.Sequence, frame.Type, frame.Data.Length);
-                
-                    var ackFrame = new Frame(frame.Sequence, FrameType.ACK);
-                    await SendFrameAsync(ackFrame, cancellationToken);
-
-                    if (frame.Sequence > _lastReadSequence || (frame.Sequence == 0 && _lastReadSequence is ushort.MaxValue or 0))
-                    {
-                        _lastReadSequence = frame.Sequence;
-                        await _frames.Writer.WriteAsync(frame, cancellationToken);
-                    }
-                    else if (frame.Sequence < _lastReadSequence) // frame.Sequence == _lastReadSequence is retry, no need to spam logs with it
-                    {
-                        
-                        _logger.LogWarning("Sequence {Sequence} past last acked sequence {PastSequence}, skipping...", frame.Sequence, _lastReadSequence);
-                    }
-
+                    await ProcessDataFrameAsync(frame, cancellationToken);
                     break;
                 default:
                     _logger.LogError("Unknown frame type {FrameType}", frame.Type);
@@ -186,9 +166,51 @@ public sealed class FrameProtocol : IFrameProtocol, IAsyncDisposable
             }
         }
     }
+
+    private void ProcessAckFrame(Frame frame)
+    {
+        if (_acks.TryRemove(frame.Sequence, out var tcs))
+        {
+            _logger.LogDebug("Sequence {Sequence} acked", frame.Sequence);
+            tcs.TrySetResult();
+        }
+        else
+        {
+            _logger.LogWarning("Sequence {Sequence} does not exist", frame.Sequence);
+        }
+    }
+
+    private async Task ProcessDataFrameAsync(Frame frame, CancellationToken cancellationToken)
+    {
+        _logger.LogDebug("New frame, sequence: {Sequence}, type: {Type}, size: {Size}", frame.Sequence, frame.Type, frame.Data.Length);
+                
+        var ackFrame = new Frame(frame.Sequence, FrameType.ACK);
+        await SendFrameAsync(ackFrame, cancellationToken);
+
+        var lastReadSequence = Interlocked.Read(ref _lastReadSequence);
+                    
+        if (frame.Sequence > lastReadSequence || (frame.Sequence == 0 && lastReadSequence is ushort.MaxValue or 0))
+        {
+            Interlocked.CompareExchange(ref _lastReadSequence, frame.Sequence, lastReadSequence);
+            await _frames.Writer.WriteAsync(frame, cancellationToken);
+        }
+        else if (frame.Sequence < lastReadSequence) // frame.Sequence == lastReadSequence is retry, no need to spam logs with it
+        {
+            _logger.LogWarning("Sequence {Sequence} past last acked sequence {PastSequence}, skipping...", frame.Sequence, lastReadSequence);
+        }
+    }
+
+    private Task OnReconnectedAsync(CancellationToken cancellationToken)
+    {
+        Interlocked.Exchange(ref _lastReadSequence, 0);
+        Interlocked.Exchange(ref _nextSequence, 0);
+        
+        return Task.CompletedTask;
+    }
     
     public async ValueTask DisposeAsync()
     {
+        _transport.OnReconnectedAsync -= OnReconnectedAsync;
         await _readerTask.DisposeAsync();
     }
 }

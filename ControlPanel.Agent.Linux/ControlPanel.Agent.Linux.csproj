@@ -12,6 +12,7 @@
     <ItemGroup>
         <PackageReference Include="ini-parser-netstandard" Version="2.5.3" />
         <PackageReference Include="Mono.Posix.NETStandard" Version="1.0.0" />
+        <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.1" />
     </ItemGroup>
     
     <ItemGroup>

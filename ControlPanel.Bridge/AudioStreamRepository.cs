@@ -48,7 +48,7 @@ public record AudioStreamDiff(AudioStreamId Id, string Source, string? Name, boo
         => new(streamInfo.Id, streamInfo.Source, streamInfo.Name, streamInfo.Mute, streamInfo.Volume);
 }
 
-public record AudioStreamIncrementalSnapshot(AudioStreamDiff[] Updated, AudioStreamId[] Deleted);
+public record AudioStreamIncrementalSnapshot(AudioStreamDiff[] Updated, AudioStreamInfo[] Deleted);
 
 public interface IAudioStreamRepository
 {
@@ -79,7 +79,7 @@ public class AudioStreamRepository : IAudioStreamRepository
     public async Task UpdateAsync(string agentId, BridgeAudioStream[] streams, CancellationToken cancellationToken)
     {
         var diff = new List<AudioStreamDiff>();
-        var removed =  new List<AudioStreamId>();
+        var removed =  new List<AudioStreamInfo>();
         
         await _streamsLock.WaitAsync(cancellationToken);
         try
@@ -89,7 +89,7 @@ public class AudioStreamRepository : IAudioStreamRepository
 
             var bridgeAgentStreams = streams.ToDictionary(x => x.Id, x => x);
                 
-            removed.AddRange(RemoveAgentStreams(agentId, agentStreams, bridgeAgentStreams));
+            removed.AddRange(RemoveAgentStreams(agentStreams, bridgeAgentStreams));
             diff.AddRange(UpdateAgentStreams(agentId, agentStreams, bridgeAgentStreams));
         }
         finally
@@ -100,7 +100,7 @@ public class AudioStreamRepository : IAudioStreamRepository
         await NotifyChangedAsync(diff, removed, cancellationToken);
     }
 
-    private async Task NotifyChangedAsync(IReadOnlyCollection<AudioStreamDiff> changed, IReadOnlyCollection<AudioStreamId> removed, CancellationToken cancellationToken)
+    private async Task NotifyChangedAsync(IReadOnlyCollection<AudioStreamDiff> changed, IReadOnlyCollection<AudioStreamInfo> removed, CancellationToken cancellationToken)
     {
         if (OnSnapshotChangedAsync == null || (changed.Count == 0 && removed.Count == 0))
             return;
@@ -119,13 +119,13 @@ public class AudioStreamRepository : IAudioStreamRepository
     
     public async Task ClearAsync(string agentId, CancellationToken cancellationToken)
     {
-        var removed = new List<AudioStreamId>();
+        var removed = new List<AudioStreamInfo>();
         
         await _streamsLock.WaitAsync(cancellationToken);
         try
         {
             if (_streams.Remove(agentId, out var streams))
-                removed.AddRange(streams.Select(x => new AudioStreamId(x.Key, agentId)));
+                removed.AddRange(streams.Values);
         }
         finally
         {
@@ -148,7 +148,7 @@ public class AudioStreamRepository : IAudioStreamRepository
         }
     }
 
-    private List<AudioStreamDiff> UpdateAgentStreams(string agentId, Dictionary<string, AudioStreamInfo> agentStreams, Dictionary<string, BridgeAudioStream> bridgeAudioStreams)
+    private static List<AudioStreamDiff> UpdateAgentStreams(string agentId, Dictionary<string, AudioStreamInfo> agentStreams, Dictionary<string, BridgeAudioStream> bridgeAudioStreams)
     {
         var diffs = new List<AudioStreamDiff>();
         
@@ -200,17 +200,15 @@ public class AudioStreamRepository : IAudioStreamRepository
         return true;
     }
     
-    private List<AudioStreamId> RemoveAgentStreams(string agentId, Dictionary<string,AudioStreamInfo> currentAgentStreams, Dictionary<string, BridgeAudioStream> bridgeAudioStreams)
+    private static List<AudioStreamInfo> RemoveAgentStreams(Dictionary<string,AudioStreamInfo> currentAgentStreams, Dictionary<string, BridgeAudioStream> bridgeAudioStreams)
     {
-        var removed = new List<AudioStreamId>();
+        var removed = new List<AudioStreamInfo>();
         var removedIds = currentAgentStreams.Keys.Where(x => !bridgeAudioStreams.ContainsKey(x));
         
         foreach (var id in removedIds)
         {
-            var streamId = new AudioStreamId(id, agentId);
-            
-            currentAgentStreams.Remove(id);
-            removed.Add(streamId);
+            if (currentAgentStreams.Remove(id, out var streamInfo))
+                removed.Add(streamInfo);
         }
 
         return removed;
