@@ -12,13 +12,7 @@ internal static class Crc16Ccitt
 
         while (size-- > 0 && reader.TryRead(out var b))
         {
-            crc ^= (ushort)(b << 8);
-            for (var i = 0; i < 8; i++)
-            {
-                crc = (crc & 0x8000) != 0
-                    ? (ushort)((crc << 1) ^ Polynomial)
-                    : (ushort)(crc << 1);
-            }
+            crc = ComputeByte(crc, b);
         }
 
         return crc;
@@ -30,13 +24,20 @@ internal static class Crc16Ccitt
         
         foreach (var b in data)
         {
-            crc ^= (ushort)(b << 8);
-            for (var i = 0; i < 8; i++)
-            {
-                crc = (crc & 0x8000) != 0
-                    ? (ushort)((crc << 1) ^ Polynomial)
-                    : (ushort)(crc << 1);
-            }
+            crc = ComputeByte(crc, b);
+        }
+        
+        return crc;
+    }
+
+    private static ushort ComputeByte(ushort crc, byte b)
+    {
+        crc ^= (ushort)(b << 8);
+        for (var i = 0; i < 8; i++)
+        {
+            crc = (crc & 0x8000) != 0
+                ? (ushort)((crc << 1) ^ Polynomial)
+                : (ushort)(crc << 1);
         }
         
         return crc;
