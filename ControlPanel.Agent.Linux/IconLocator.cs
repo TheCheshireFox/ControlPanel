@@ -1,5 +1,8 @@
+using System.Text.Json;
+using ControlPanel.Shared;
 using IniParser;
 using IniParser.Model;
+using Mono.Unix;
 
 namespace ControlPanel.Agent.Linux;
 
@@ -8,11 +11,15 @@ public static class IconLocator
     private const string FallbackTheme = "hicolor";
     
     private static readonly Dictionary<string, string> _appsIcons = new();
+    private static readonly Dictionary<string, string> _staticAppIcons;
     private static readonly IconIndex _iconIndex;
 
     static IconLocator()
     {
         _iconIndex = new IconIndex([GetCurrentTheme(), FallbackTheme], iconSize: 32);
+        _staticAppIcons = JsonSerializer.Deserialize<Dictionary<string, string>>(ResourceLoader.Load("Assets/static_icon_mapping.json"))
+                          ?? throw new Exception("Unable to load static icons mapping");
+        
         RefreshCache();
     }
     
@@ -43,6 +50,14 @@ public static class IconLocator
                 continue;
             
             _appsIcons[executable] = iconPath;
+        }
+
+        foreach (var (app, icon) in _staticAppIcons)
+        {
+            if (!_iconIndex.TryResolveIcon(icon, out var iconPath))
+                continue;
+            
+            _appsIcons[app] = iconPath;
         }
     }
 
@@ -105,10 +120,10 @@ public static class IconLocator
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .Select(x => Path.Combine(x, program))
             .Where(File.Exists)
-            .FirstOrDefault(x => new Mono.Unix.UnixFileInfo(x).FileAccessPermissions.HasFlag(
-                Mono.Unix.FileAccessPermissions.UserExecute |
-                Mono.Unix.FileAccessPermissions.GroupExecute |
-                Mono.Unix.FileAccessPermissions.OtherExecute));
+            .FirstOrDefault(x => new UnixFileInfo(x).FileAccessPermissions.HasFlag(
+                FileAccessPermissions.UserExecute |
+                FileAccessPermissions.GroupExecute |
+                FileAccessPermissions.OtherExecute));
     }
     
     private static IniData ReadIniFile(string path)

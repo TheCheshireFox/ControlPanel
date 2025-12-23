@@ -22,5 +22,7 @@
     
     <ItemGroup>
       <EmbeddedResource Include="Assets\linux-logo.svg" />
+      <None Remove="Assets\static_icon_mapping.json" />
+      <EmbeddedResource Include="Assets\static_icon_mapping.json" />
     </ItemGroup>
 </Project>

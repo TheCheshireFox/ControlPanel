@@ -64,7 +64,7 @@ public sealed class FrameProtocol : IFrameProtocol, IAsyncDisposable
                 try
                 {
                     await tcs.Task.WaitAsync(timeout, cancellationToken);
-                    _logger.LogDebug("Message {Sequence} ACKed by protocol", seq);
+                    _logger.LogDebug("Message {Sequence} ACKed", seq);
                     return;
                 }
                 catch (TimeoutException)
@@ -124,7 +124,7 @@ public sealed class FrameProtocol : IFrameProtocol, IAsyncDisposable
 
                 if (ms.Length > streamMaxSize)
                 {
-                    ms.Resize((int)ms.Length - readOffset);
+                    ms.ShrinkTo((int)ms.Length - readOffset);
                     readOffset = 0;
                 }
             }
