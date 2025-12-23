@@ -5,7 +5,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "esp_timer.h"
 
 #include "esp_utility.hpp"
@@ -25,7 +25,7 @@ class cst328_driver_t {
     static constexpr uint16_t CST328_REG_CONFIG = 0x8047;
 
 public:
-    cst328_driver_t(i2c_port_t port, uint32_t clock, int sda, int scl, int interrupt = -1)
+    cst328_driver_t(i2c_port_t port, uint32_t clock, gpio_num_t sda, gpio_num_t scl, gpio_num_t interrupt = gpio_num_t::GPIO_NUM_NC)
         : _port(port), _interrupt(interrupt != -1)
     {
         if (interrupt != -1)
@@ -39,19 +39,27 @@ public:
             ESP_ERROR_CHECK(gpio_config(&int_conf));
         }
         
-        i2c_config_t conf = {
-            .mode = I2C_MODE_MASTER,
-            .sda_io_num    = sda,
-            .scl_io_num    = scl,
-            .sda_pullup_en = GPIO_PULLUP_ENABLE,
-            .scl_pullup_en = GPIO_PULLUP_ENABLE,
-            .master = {
-                .clk_speed = clock
+        i2c_master_bus_config_t conf = {
+            .i2c_port = port,
+            .sda_io_num = sda,
+            .scl_io_num = scl,
+            .clk_source = I2C_CLK_SRC_DEFAULT,
+            .glitch_ignore_cnt = 7,
+            .flags = {
+                .enable_internal_pullup = true
             }
         };
 
-        ESP_ERROR_CHECK(i2c_param_config(port, &conf));
-        ESP_ERROR_CHECK(i2c_driver_install(port, conf.mode, 0, 0, 0));
+        i2c_master_bus_handle_t i2c;
+        ESP_ERROR_CHECK(i2c_new_master_bus(&conf, &i2c));
+
+        i2c_device_config_t dev_config {
+            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+            .device_address = CST328_I2C_ADDR,
+            .scl_speed_hz = clock
+        };
+        
+        ESP_ERROR_CHECK(i2c_master_bus_add_device(i2c, &dev_config, &_dev));
 
         if (_interrupt)
         {
@@ -128,7 +136,7 @@ private:
         {
             ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
-            if (cst328_read_xy_single(pt) != ESP_OK) {
+            if (ESP_ERROR_CHECK_WITHOUT_ABORT(cst328_read_xy_single(pt)) != ESP_OK) {
                 continue;
             }
 
@@ -148,34 +156,21 @@ private:
             (uint8_t)(reg & 0xFF),
         };
 
-        return i2c_master_write_read_device(
-            _port,
-            CST328_I2C_ADDR,
-            reg_bytes, sizeof(reg_bytes),
-            data, len,
-            1000 / portTICK_PERIOD_MS
-        );
+        return i2c_master_transmit_receive(_dev, reg_bytes, sizeof(reg_bytes), data, len, 1000);
     }
 
     esp_err_t cst328_reg_write(uint16_t reg, const uint8_t *data, size_t len)
     {
-        i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+        if (!data || !len)
+            return ESP_ERR_INVALID_ARG;
 
-        i2c_master_start(cmd);
-        i2c_master_write_byte(cmd, (CST328_I2C_ADDR << 1) | I2C_MASTER_WRITE, true);
-        i2c_master_write_byte(cmd, (uint8_t)(reg >> 8), true);
-        i2c_master_write_byte(cmd, (uint8_t)(reg & 0xFF), true);
+        uint8_t reg_bytes[2] = { (uint8_t)(reg >> 8), (uint8_t)(reg & 0xFF) };
+        i2c_master_transmit_multi_buffer_info_t buf[2] = {
+            { .write_buffer = reg_bytes, .buffer_size = sizeof(reg_bytes) },
+            { .write_buffer = data, .buffer_size = len }
+        };
 
-        if (len && data) {
-            i2c_master_write(cmd, data, len, true);
-        }
-
-        i2c_master_stop(cmd);
-
-        esp_err_t err = i2c_master_cmd_begin(_port, cmd, pdMS_TO_TICKS(1000));
-
-        i2c_cmd_link_delete(cmd);
-        return err;
+        return i2c_master_multi_buffer_transmit(_dev, buf, std::size(buf), 1000);
     }
 
     esp_err_t cst328_read_xy_single(touch_point_t& pt)
@@ -207,4 +202,5 @@ private:
     touch_point_t _last_point;
     std::function<void(const touch_point_t&)> _on_touch;
     const bool _interrupt;
+    i2c_master_dev_handle_t _dev;
 };

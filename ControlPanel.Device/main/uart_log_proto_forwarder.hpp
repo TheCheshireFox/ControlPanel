@@ -45,25 +45,45 @@ private:
         }
 
         log_line_t line{};
-        va_list ap_copy;
-        va_copy(ap_copy, ap);
 
-        auto n = vsnprintf(line.buf, LOG_LINE_MAX, fmt, ap_copy);
-        va_end(ap_copy);
+        va_list ap_sz;
+        va_copy(ap_sz, ap);
+        auto sz = vsnprintf(nullptr, 0, fmt, ap_sz);
+        va_end(ap_sz);
 
-        if (n < 0)
-        {
-            line.len = 0;
-            line.buf[0] = '\0';
-        } else if (n >= (int)LOG_LINE_MAX)
+        char buf[sz + 1];
+
+        va_list ap_str;
+        va_copy(ap_str, ap);
+        vsnprintf(buf, sz + 1, fmt, ap_str);
+        va_end(ap_str);
+
+        for (auto i = 0; i < sz / (LOG_LINE_MAX - 1); i++)
         {
             line.len = LOG_LINE_MAX - 1;
-            line.buf[LOG_LINE_MAX - 1] = '\0';
-        } else
-        {
-            line.len = (uint16_t)n;
+            std::memcpy(line.buf, buf + i * (LOG_LINE_MAX - 1), LOG_LINE_MAX - 1);
+            line.buf[LOG_LINE_MAX - 1] = 0;
+
+            enqueue_line(line);
         }
 
+        auto remain = sz % (LOG_LINE_MAX - 1);
+        if (remain > 0)
+        {
+            line.len = remain;
+            std::memcpy(line.buf, buf + (sz - remain), remain);
+            line.buf[remain] = 0;
+
+            enqueue_line(line);
+        }
+        
+        __atomic_store_n(&_in_hook, 0, __ATOMIC_RELEASE);
+
+        return sz;
+    }
+
+    static void enqueue_line(log_line_t& line)
+    {
         if (xPortInIsrContext())
         {
             BaseType_t task_woken = pdFALSE;
@@ -73,10 +93,6 @@ private:
         {
             xQueueSend(_queue, &line, 0);
         }
-
-        __atomic_store_n(&_in_hook, 0, __ATOMIC_RELEASE);
-
-        return n;
     }
 
     static auto scoped_log_disable(const char* tag)

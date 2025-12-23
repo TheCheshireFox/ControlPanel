@@ -8,7 +8,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "driver/uart.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -31,33 +31,33 @@ static constexpr char TAG[] = "main";
 // ST7789T3
 #define LCD_SPI_HOST   SPI3_HOST
 #define LCD_SPI_CLOCK  60 * 1000000
-#define PIN_LCD_MOSI   23
-#define PIN_LCD_SCLK   18
-#define PIN_LCD_CS     5
-#define PIN_LCD_DC     27
-#define PIN_LCD_RST    26 // shared with touch RST
-#define PIN_LCD_BL     25
+#define PIN_LCD_MOSI   GPIO_NUM_23
+#define PIN_LCD_SCLK   GPIO_NUM_18
+#define PIN_LCD_CS     GPIO_NUM_5
+#define PIN_LCD_DC     GPIO_NUM_27
+#define PIN_LCD_RST    GPIO_NUM_26 // shared with touch RST
+#define PIN_LCD_BL     GPIO_NUM_25
 #define LCD_WIDTH      240
 #define LCD_HEIGHT     320
 
 // CST328
 #define I2C_TOUCH_PORT    I2C_NUM_0
 #define I2C_TOUCH_FREQ_HZ 400000
-#define PIN_TOUCH_SDA  21
-#define PIN_TOUCH_SCL  22
-#define PIN_TOUCH_RST  26 // shared with lcd RST
-#define PIN_TOUCH_INT  4
+#define PIN_TOUCH_SDA     GPIO_NUM_21
+#define PIN_TOUCH_SCL     GPIO_NUM_22
+#define PIN_TOUCH_RST     GPIO_NUM_26 // shared with lcd RST
+#define PIN_TOUCH_INT     GPIO_NUM_4
 
 // SD
 #define SD_SPI_HOST SPI2_HOST
-#define SD_SCK      14
-#define SD_MISO     13
-#define SD_MOSI     32
-#define SD_CS       33
+#define SD_SCK      GPIO_NUM_14
+#define SD_MISO     GPIO_NUM_13
+#define SD_MOSI     GPIO_NUM_32
+#define SD_CS       GPIO_NUM_33
 
 #define UART_PORT       UART_NUM_0
-#define UART_TX         gpio_num_t(1) // 17
-#define UART_RX         gpio_num_t(3) // 16
+#define UART_TX         GPIO_NUM_1 // 17
+#define UART_RX         GPIO_NUM_3 // 16
 #define UART_BUF_SIZE   8096
 #define UART_BAUDRATE   921600
 

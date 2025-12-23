@@ -24,7 +24,7 @@ public:
         landscape,
     };
 
-    waveshare_st7789_t(spi_host_device_t spi_host, int cs, int dc, int rst, int bl,
+    waveshare_st7789_t(spi_host_device_t spi_host, gpio_num_t cs, gpio_num_t dc, gpio_num_t rst, gpio_num_t bl,
             uint32_t width = 240, uint32_t height = 320, int spi_clock_hz = 40000000, orientation_t orientation = orientation_t::portrait)
         : _spi_host(spi_host),
           _spi_dev(nullptr),

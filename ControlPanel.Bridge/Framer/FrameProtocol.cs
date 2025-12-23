@@ -45,6 +45,7 @@ public sealed class FrameProtocol : IFrameProtocol, IAsyncDisposable
         _logger = logger;
         _framer = new Framer(Magic, logger);
         
+        _transport.OnReconnectedAsync += TransportOnOnReconnectedAsync;
         _readerTask = new CancellableTask(async ct => await TransportReaderTaskAsync(ct));
     }
 
@@ -229,8 +230,15 @@ public sealed class FrameProtocol : IFrameProtocol, IAsyncDisposable
         }
     }
 
+    private Task TransportOnOnReconnectedAsync(CancellationToken arg)
+    {
+        Interlocked.Exchange(ref _lastReadSequence, 0); // TODO: implement with SYN frame
+        return Task.CompletedTask;
+    }
+    
     public async ValueTask DisposeAsync()
     {
+        _transport.OnReconnectedAsync -= TransportOnOnReconnectedAsync;
         await _readerTask.DisposeAsync();
     }
 }
