@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using ControlPanel.Shared;
+using Nito.AsyncEx;
 
 namespace ControlPanel.Bridge.Framer;
 
@@ -30,10 +31,12 @@ public sealed class FrameProtocol : IFrameProtocol, IAsyncDisposable
     private readonly Framer _framer;
     private readonly Channel<Frame> _frames = Channel.CreateUnbounded<Frame>(new UnboundedChannelOptions { SingleWriter = true });
     private readonly CancellableTask _readerTask;
+    private readonly AsyncAutoResetEvent _sendingReadyEvent = new();
     
     private readonly ConcurrentDictionary<ushort, TaskCompletionSource> _acks = new();
 
     private ulong _nextSequence;
+    private ulong _currentSequence = 1;
     private ulong _lastReadSequence;
     
     public FrameProtocol(IFrameTransport transport, ILogger<FrameProtocol> logger)
@@ -43,33 +46,29 @@ public sealed class FrameProtocol : IFrameProtocol, IAsyncDisposable
         _framer = new Framer(Magic, logger);
         
         _readerTask = new CancellableTask(async ct => await TransportReaderTaskAsync(ct));
-        _transport.OnReconnectedAsync += OnReconnectedAsync;
     }
 
     public async Task SendAsync(ReadOnlyMemory<byte> data, TimeSpan timeout, int retryCount, TimeSpan retryDelay, CancellationToken cancellationToken)
     {
-        var seq = (ushort)Interlocked.Increment(ref _nextSequence);
-        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var (frame, tcs) = PrepareFrame(data);
         
-        if (!_acks.TryAdd(seq, tcs))
-            throw new Exception($"Sequence {seq} already exists");
+        await WaitForSendingAsync(frame.Sequence, cancellationToken);
         
         try
         {
-            var frame = new Frame(seq, FrameType.Data, data.ToArray());
-
             for (var i = 0; i < retryCount; i++)
             {
                 await SendFrameAsync(frame, cancellationToken);
+                
                 try
                 {
                     await tcs.Task.WaitAsync(timeout, cancellationToken);
-                    _logger.LogDebug("Message {Sequence} ACKed", seq);
+                    _logger.LogDebug("Message {Sequence} ACKed", frame.Sequence);
                     return;
                 }
                 catch (TimeoutException)
                 {
-                    _logger.LogWarning("Message {Sequence} timed out. Retry {Retry} of {MaxRetry}, waiting {Delay}", seq, i + 1, retryCount, retryDelay);
+                    _logger.LogWarning("Message {Sequence} timed out. Retry {Retry} of {MaxRetry}, waiting {Delay}", frame.Sequence, i + 1, retryCount, retryDelay);
                     await Task.Delay(retryDelay, cancellationToken);
                 }
             }
@@ -83,8 +82,38 @@ public sealed class FrameProtocol : IFrameProtocol, IAsyncDisposable
         }
         finally
         {
-            _acks.TryRemove(seq, out _);
+            _acks.TryRemove(frame.Sequence, out _);
+            
+            Interlocked.Increment(ref _currentSequence);
+            _sendingReadyEvent.Set();
         }
+    }
+
+    private async Task WaitForSendingAsync(ushort seq, CancellationToken cancellationToken)
+    {
+        if (Interlocked.Read(ref _currentSequence) == seq)
+            return;
+        
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            await _sendingReadyEvent.WaitAsync(cancellationToken);
+            
+            if (Interlocked.Read(ref _currentSequence) == seq)
+                return;
+        }
+    }
+    
+    private (Frame Frame, TaskCompletionSource Tcs) PrepareFrame(ReadOnlyMemory<byte> data)
+    {
+        var seq = (ushort)Interlocked.Increment(ref _nextSequence);
+         
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!_acks.TryAdd(seq, tcs))
+            throw new Exception($"Sequence {seq} already exists");
+            
+        var frame = new Frame(seq, FrameType.Data, data.ToArray());
+            
+        return (frame, tcs);
     }
 
     private async Task SendFrameAsync(Frame frame, CancellationToken cancellationToken)
@@ -194,23 +223,14 @@ public sealed class FrameProtocol : IFrameProtocol, IAsyncDisposable
             Interlocked.CompareExchange(ref _lastReadSequence, frame.Sequence, lastReadSequence);
             await _frames.Writer.WriteAsync(frame, cancellationToken);
         }
-        else if (frame.Sequence < lastReadSequence) // frame.Sequence == lastReadSequence is retry, no need to spam logs with it
+        else if (frame.Sequence < lastReadSequence) // frame.Sequence == lastReadSequence is a retry, no need to spam logs with it
         {
             _logger.LogWarning("Sequence {Sequence} past last acked sequence {PastSequence}, skipping...", frame.Sequence, lastReadSequence);
         }
     }
 
-    private Task OnReconnectedAsync(CancellationToken cancellationToken)
-    {
-        Interlocked.Exchange(ref _lastReadSequence, 0);
-        Interlocked.Exchange(ref _nextSequence, 0);
-        
-        return Task.CompletedTask;
-    }
-    
     public async ValueTask DisposeAsync()
     {
-        _transport.OnReconnectedAsync -= OnReconnectedAsync;
         await _readerTask.DisposeAsync();
     }
 }

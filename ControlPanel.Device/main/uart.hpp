@@ -78,9 +78,13 @@ public:
         auto block = _buffer_queue.take();
         std::copy_n(data.data(), data.size(), block.data());
 
-        frame_data_t frame_data{_seq_cnt++, retry_interval_ms, retry_count, frame_type_t::data, data.size(), block};
-        if (!xQueueSend(_send_queue, &frame_data, portMAX_DELAY))
-            ESP_LOGE(SEND_TAG, "%s", "Unable to enqueue frame");
+        {
+            std::scoped_lock lock{_send_sync};
+
+            frame_data_t frame_data{_seq_cnt++, retry_interval_ms, retry_count, frame_type_t::data, data.size(), block};
+            if (!xQueueSend(_send_queue, &frame_data, portMAX_DELAY))
+                ESP_LOGE(SEND_TAG, "%s", "Unable to enqueue frame");
+        }
     }
 
 private:
@@ -229,5 +233,6 @@ private:
     uart_framer_t<sizeof(MAGIC)> _framer;
     std::function<void(std::span<const uint8_t>)> _data_handler;
 
+    std::recursive_mutex _send_sync;
     std::atomic<uint16_t> _seq_cnt = 0;
 };
