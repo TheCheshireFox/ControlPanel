@@ -20,9 +20,9 @@ namespace transport
     requires frame_transport_t<TTransport> && details::is_u8_array_v<std::remove_cvref_t<decltype(Magic)>>
     class frame_host_connection_t
     {
-        using framer_t = framer_t<Magic.size(), BufferSize>;
+        using connection_framer_t = framer_t<Magic.size(), BufferSize>;
         
-        static constexpr size_t MAX_TX_BODY = MAX_TX_FRAME - framer_t::calc_frame_size(0);
+        static constexpr size_t MAX_TX_BODY = MAX_TX_FRAME - connection_framer_t::calc_frame_size(0);
 
     public:
         static constexpr char TAG[] = "FP";
@@ -152,7 +152,7 @@ namespace transport
         };
 
         TTransport& _transport;
-        framer_t _framer;
+        connection_framer_t _framer;
 
         std::function<void(std::span<const uint8_t>)> _data_handler;
 
@@ -161,7 +161,7 @@ namespace transport
         std::mutex _send_sync;
         std::mutex _tx_sync;
 
-        std::array<uint8_t, framer_t::calc_frame_size(0) * 2> _ack_buffer;
+        std::array<uint8_t, connection_framer_t::calc_frame_size(0) * 2> _ack_buffer;
         uint16_t _last_ack = 0;
         std::condition_variable _new_ack;
         std::mutex _ack_sync;

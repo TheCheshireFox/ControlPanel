@@ -27,6 +27,9 @@ struct event_id
     bool operator<(const event_id& other) const { return std::tuple{id, agent_id} < std::tuple{other.id, other.agent_id}; }
 };
 
+template<typename R, typename T>
+concept Iterable = std::ranges::input_range<R> && std::convertible_to<std::ranges::range_reference_t<R>, T>;
+
 class volume_display_t
 {
     static constexpr const char* TAG = "DISPLAY";
@@ -46,7 +49,7 @@ public:
 
     }
 
-    void refresh(const std::vector<bridge_audio_stream_t>& updated, const std::vector<bridge_audio_stream_id_t>& deleted)
+    void refresh(Iterable<bridge_audio_stream_t> auto&& updated, Iterable<bridge_audio_stream_id_t> auto&& deleted)
     {
         std::scoped_lock lock{lv_sync};
 
@@ -141,7 +144,7 @@ private:
             _on_mute_changed(id, mute);
     }
 
-    void remove_outdated(const std::vector<bridge_audio_stream_id_t>& deleted)
+    void remove_outdated(Iterable<bridge_audio_stream_id_t> auto&& deleted)
     {
         for (const auto& stream_id: deleted)
         {
@@ -172,7 +175,10 @@ private:
         auto item = _volume_list.add_item();
         auto [it, inserted] = _volume_list_items.emplace(id, vl_list_item_t{ item, std::make_unique<list_item_t>(item), source });
         if (!inserted)
+        {
+            _volume_list.delete_item(item);
             return;
+        }
         
         auto& list_item = it->second.list_item;
 

@@ -69,12 +69,12 @@ static constexpr char TAG[] = "main";
 #define BL_TIMER_LONG  uint64_t(3600 * 1000)
 #define BL_TIMER_SHORT uint64_t(30 * 1000)
 
-static constexpr std::array<uint8_t, 2> MAGIC{0x19, 0x16};
 static std::optional<cst328_driver_t> cst328_driver;
 static std::optional<waveshare_st7789_t> st7789_driver;
 static std::optional<volume_display_t> volume_display;
 static std::optional<backlight_timer_t<waveshare_st7789_t>> backlight_timer;
 
+static constexpr std::array<uint8_t, 2> MAGIC{0x19, 0x16};
 using ft_type = ft_select<ft_t::bt_uart>::type;
 static std::optional<ft_type> frame_transport;
 static std::optional<transport::frame_host_connection_t<ft_type, MAGIC>> host_connection;

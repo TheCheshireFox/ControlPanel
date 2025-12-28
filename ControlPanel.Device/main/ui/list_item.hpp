@@ -14,8 +14,7 @@ class list_item_t
 {
 public:
     list_item_t(lv_obj_t* parent)
-        : _title_anim(), _app_icon_dsc(), _app_icon_data()
-        , _mute(false), _slider_editing(false), _on_volume_changed(), _on_mute_changed()
+        : _mute(false), _slider_editing(false), _on_volume_changed(), _on_mute_changed()
     {
         std::unique_lock lock{lv_sync};
 
@@ -256,11 +255,6 @@ private:
     image_t _title;
     lv_obj_t* _slider;
     lv_obj_t* _slider_label;
-
-    lv_anim_t _title_anim;
-
-    lv_image_dsc_t _app_icon_dsc;
-    std::shared_ptr<uint8_t[]> _app_icon_data;
 
     bool _mute;
     bool _slider_editing;
