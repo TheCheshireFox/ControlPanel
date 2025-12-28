@@ -11,8 +11,6 @@
 #include "esp_bt_device.h"
 #include "esp_spp_api.h"
 
-#include "esp_utility.hpp"
-
 namespace transport
 {
     struct bt_uart_transport_t

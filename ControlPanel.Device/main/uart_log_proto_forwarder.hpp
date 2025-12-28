@@ -10,9 +10,9 @@
 #include "esp_log.h"
 #include "esp_rom_sys.h"
 
-#include "esp_utility.hpp"
+#include "utils/esp_utility.hpp"
 #include "protocol/frame_host_connection.hpp"
-#include "protocol.hpp"
+#include "protocol/protocol.hpp"
 
 class uart_log_proto_forwarder
 {

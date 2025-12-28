@@ -23,13 +23,13 @@
 #include "volume_display.hpp"
 #include "backlight_timer.hpp"
 #include "uart_log_proto_forwarder.hpp"
-#include "lv_sync.hpp"
-#include "lvgl_logging.hpp"
+#include "utils/lv_sync.hpp"
+#include "utils/lvgl_logging.hpp"
 
 #include "protocol/frame_host_connection.hpp"
 #include "protocol/transport/uart_transport.hpp"
 #include "protocol/transport/bt_uart_transport.hpp"
-#include "protocol.hpp"
+#include "protocol/protocol.hpp"
 
 static constexpr char TAG[] = "main";
 

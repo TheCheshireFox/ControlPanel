@@ -9,11 +9,11 @@
 #include <set>
 
 #include "lvgl.h"
-#include "lv_sync.hpp"
+#include "utils/lv_sync.hpp"
 
-#include "esp_utility.hpp"
+#include "utils/esp_utility.hpp"
 
-#include "protocol.hpp"
+#include "protocol/protocol.hpp"
 #include "ui/style.hpp"
 #include "ui/flex_list.hpp"
 #include "ui/list_item.hpp"

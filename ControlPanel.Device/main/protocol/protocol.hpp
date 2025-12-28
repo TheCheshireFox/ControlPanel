@@ -12,7 +12,7 @@
 #define ARDUINOJSON_AUTO_SHRINK 0
 
 #include "ArduinoJson.h"
-#include "arduino_json_utils.hpp"
+#include "utils/arduino_json_utils.hpp"
 
 enum bridge_message_type_t : int8_t
 {

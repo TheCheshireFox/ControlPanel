@@ -8,7 +8,7 @@
 #include "driver/i2c_master.h"
 #include "esp_timer.h"
 
-#include "esp_utility.hpp"
+#include "utils/esp_utility.hpp"
 
 struct touch_point_t {
     bool touched = false;
