@@ -27,9 +27,9 @@
 #include "lvgl_logging.hpp"
 
 #include "protocol/frame_host_connection.hpp"
+#include "protocol/transport/uart_transport.hpp"
+#include "protocol/transport/bt_uart_transport.hpp"
 #include "protocol.hpp"
-
-#include "frame_transport_selector.hpp"
 
 static constexpr char TAG[] = "main";
 
@@ -75,9 +75,8 @@ static std::optional<volume_display_t> volume_display;
 static std::optional<backlight_timer_t<waveshare_st7789_t>> backlight_timer;
 
 static constexpr std::array<uint8_t, 2> MAGIC{0x19, 0x16};
-using ft_type = ft_select<ft_t::bt_uart>::type;
-static std::optional<ft_type> frame_transport;
-static std::optional<transport::frame_host_connection_t<ft_type, MAGIC>> host_connection;
+static std::optional<transport::bt_uart_transport_t> frame_transport;
+static std::optional<transport::frame_host_connection_t<transport::bt_uart_transport_t, MAGIC>> host_connection;
 
 static void nvs_init()
 {
