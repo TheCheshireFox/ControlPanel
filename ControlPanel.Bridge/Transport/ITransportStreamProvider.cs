@@ -1,7 +1,6 @@
 using System.IO.Ports;
 using System.Text;
 using ControlPanel.Bridge.Options;
-using ControlPanel.Shared;
 using Microsoft.Extensions.Options;
 
 namespace ControlPanel.Bridge.Transport;
@@ -75,7 +74,7 @@ public class BrRfcommTransportStreamProvider : ITransportStreamProvider
     
     public Task<TransportStream> OpenStreamAsync(CancellationToken cancellationToken)
     {
-        var s = BtRfcomm.Connect(_addr, _channel, TimeSpan.FromSeconds(30), cancellationToken);
+        var s = BtRfcomm.BtRfcomm.Connect(_addr, _channel, TimeSpan.MaxValue, cancellationToken);
         return Task.FromResult(new TransportStream(s));
     }
 }

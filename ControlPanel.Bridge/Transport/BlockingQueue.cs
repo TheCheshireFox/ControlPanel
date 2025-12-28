@@ -5,41 +5,33 @@ namespace ControlPanel.Bridge.Transport;
 internal class BlockingQueue<T>
 {
     private readonly LinkedList<T> _list = [];
-    private readonly AsyncLock _lock = new();
-    private readonly AsyncAutoResetEvent _evt = new();
+    private readonly AsyncMonitor _monitor = new();
 
     public async Task EnqueueAsync(T item, CancellationToken cancellationToken)
     {
-        using (await _lock.LockAsync(cancellationToken))
+        using (await _monitor.EnterAsync(cancellationToken))
         {
             _list.AddLast(item);
-            _evt.Set();
+            _monitor.Pulse();
         }
     }
 
     public async Task TakeOrReplaceAsync(Func<T, T?> process, CancellationToken cancellationToken)
     {
-        while (true)
+        using (await _monitor.EnterAsync(cancellationToken))
         {
-            using (await _lock.LockAsync(cancellationToken))
+            if (_list.Count == 0)
+                await _monitor.WaitAsync(cancellationToken);
+                
+            var result = process(_list.First!.Value);
+            if (result == null)
             {
-                if (_list.Count > 0)
-                {
-                    var result = process(_list.First!.Value);
-                    if (result == null)
-                    {
-                        _list.RemoveFirst();
-                    }
-                    else
-                    {
-                        _list.First.Value = result;
-                    }
-                    
-                    return;
-                }
+                _list.RemoveFirst();
             }
-            
-            await _evt.WaitAsync(cancellationToken);
+            else
+            {
+                _list.First.Value = result;
+            }
         }
     }
 }
