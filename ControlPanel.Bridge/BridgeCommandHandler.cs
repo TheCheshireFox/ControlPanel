@@ -36,26 +36,33 @@ public class BridgeCommandHandler : IBridgeCommandHandler
 
     public async Task HandleAsync(UartMessage message, CancellationToken cancellationToken)
     {
-        switch (message)
+        try
         {
-            case UartSetVolumeMessage setVolume:
-                await TrySendAsync(setVolume.Id.AgentId, setVolume, cancellationToken);
-                break;
-            case UartSetMuteMessage setMute:
-                await TrySendAsync(setMute.Id.AgentId, setMute, cancellationToken);
-                break;
-            case UartGetIconMessage getIcons:
-                await TrySendIconAsync(getIcons.Source, getIcons.AgentId, cancellationToken);
-                break;
-            case UartRequestRefreshMessage:
-                await SendAllStreamsAsync(cancellationToken);
-                break;
-            case UartLogMessage logMessage:
-                PrintLogs(logMessage);
-                break;
-            default:
-                _logger.LogWarning("Unknown message type {Type}", message.Type);
-                break;
+            switch (message)
+            {
+                case UartSetVolumeMessage setVolume:
+                    await TrySendAsync(setVolume.Id.AgentId, setVolume, cancellationToken);
+                    break;
+                case UartSetMuteMessage setMute:
+                    await TrySendAsync(setMute.Id.AgentId, setMute, cancellationToken);
+                    break;
+                case UartGetIconMessage getIcons:
+                    await TrySendIconAsync(getIcons.Source, getIcons.AgentId, cancellationToken);
+                    break;
+                case UartRequestRefreshMessage:
+                    await SendAllStreamsAsync(cancellationToken);
+                    break;
+                case UartLogMessage logMessage:
+                    PrintLogs(logMessage);
+                    break;
+                default:
+                    _logger.LogWarning("Unknown message type {Type}", message.Type);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to handle message {Type}", message.Type);
         }
     }
 

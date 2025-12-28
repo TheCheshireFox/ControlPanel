@@ -23,7 +23,7 @@ enum bridge_message_type_t : int8_t
     icon,
     get_icon,
     request_refresh,
-    log
+    log_line
 };
 
 template<bridge_message_type_t Type>
@@ -102,7 +102,7 @@ struct request_refresh_message_t : public bridge_message_base_t<bridge_message_t
 };
 SIMPLE_CONVERT_TO_JSON(request_refresh_message_t, type);
 
-struct log_message_t : public bridge_message_base_t<bridge_message_type_t::log>
+struct log_message_t : public bridge_message_base_t<bridge_message_type_t::log_line>
 {
     std::string line;
 };

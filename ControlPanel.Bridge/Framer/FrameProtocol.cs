@@ -1,11 +1,31 @@
 using System.Buffers;
-using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using ControlPanel.Shared;
 using Nito.AsyncEx;
 
 namespace ControlPanel.Bridge.Framer;
+
+internal static class AsyncMonitorExtensions
+{
+    public static async Task WaitForAsync(this AsyncMonitor monitor, Func<bool> predicate, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(timeout);
+
+        try
+        {
+            while (!predicate())
+            {
+                await monitor.WaitAsync(cts.Token);
+            }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException();
+        }
+    }
+}
 
 public interface IFrameTransport
 {
@@ -17,7 +37,7 @@ public interface IFrameTransport
 
 public interface IFrameProtocol
 {
-    Task SendAsync(ReadOnlyMemory<byte> data, TimeSpan timeout, int retryCount, TimeSpan retryDelay, CancellationToken cancellationToken);
+    Task SendAsync(ReadOnlyMemory<byte> data, TimeSpan timeout, int retryCount, CancellationToken cancellationToken);
     IAsyncEnumerable<byte[]> ReadAsync(CancellationToken cancellationToken);
 }
 
@@ -31,13 +51,11 @@ public sealed class FrameProtocol : IFrameProtocol, IAsyncDisposable
     private readonly Framer _framer;
     private readonly Channel<Frame> _frames = Channel.CreateUnbounded<Frame>(new UnboundedChannelOptions { SingleWriter = true });
     private readonly CancellableTask _readerTask;
-    private readonly AsyncAutoResetEvent _sendingReadyEvent = new();
-    
-    private readonly ConcurrentDictionary<ushort, TaskCompletionSource> _acks = new();
+    private readonly AsyncMonitor _sendSync = new();
 
-    private ulong _nextSequence;
-    private ulong _currentSequence = 1;
-    private ulong _lastReadSequence;
+    private ushort _nextSequence;
+    private ushort _lastAckSequence = ushort.MaxValue;
+    private ushort _lastReadSequence;
     
     public FrameProtocol(IFrameTransport transport, ILogger<FrameProtocol> logger)
     {
@@ -49,79 +67,34 @@ public sealed class FrameProtocol : IFrameProtocol, IAsyncDisposable
         _readerTask = new CancellableTask(async ct => await TransportReaderTaskAsync(ct));
     }
 
-    public async Task SendAsync(ReadOnlyMemory<byte> data, TimeSpan timeout, int retryCount, TimeSpan retryDelay, CancellationToken cancellationToken)
+    public async Task SendAsync(ReadOnlyMemory<byte> data, TimeSpan timeout, int retryCount, CancellationToken cancellationToken)
     {
-        var (frame, tcs) = PrepareFrame(data);
-        
-        await WaitForSendingAsync(frame.Sequence, cancellationToken);
-        
-        try
+        using (await _sendSync.EnterAsync(cancellationToken))
         {
+            var frame = new Frame(++_nextSequence, FrameType.Data, data.ToArray());
+            
             for (var i = 0; i < retryCount; i++)
             {
-                await SendFrameAsync(frame, cancellationToken);
-                
                 try
                 {
-                    await tcs.Task.WaitAsync(timeout, cancellationToken);
+                    await SendFrameAsync(frame, cancellationToken);
+                    await _sendSync.WaitForAsync(() => _lastAckSequence == frame.Sequence, timeout, cancellationToken);
                     _logger.LogDebug("Message {Sequence} ACKed", frame.Sequence);
                     return;
                 }
-                catch (TimeoutException)
+                catch (TimeoutException) when (i < retryCount)
                 {
-                    _logger.LogWarning("Message {Sequence} timed out. Retry {Retry} of {MaxRetry}, waiting {Delay}", frame.Sequence, i + 1, retryCount, retryDelay);
-                    await Task.Delay(retryDelay, cancellationToken);
+                    _logger.LogWarning("Message {Sequence} timed out. Retry {Retry} of {MaxRetry}", frame.Sequence, i + 1, retryCount);
                 }
             }
-
-            throw new TimeoutException("ACK wait timed out");
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error while sending ack");
-            throw;
-        }
-        finally
-        {
-            _acks.TryRemove(frame.Sequence, out _);
-            
-            Interlocked.Increment(ref _currentSequence);
-            _sendingReadyEvent.Set();
-        }
-    }
-
-    private async Task WaitForSendingAsync(ushort seq, CancellationToken cancellationToken)
-    {
-        if (Interlocked.Read(ref _currentSequence) == seq)
-            return;
-        
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            await _sendingReadyEvent.WaitAsync(cancellationToken);
-            
-            if (Interlocked.Read(ref _currentSequence) == seq)
-                return;
-        }
-    }
-    
-    private (Frame Frame, TaskCompletionSource Tcs) PrepareFrame(ReadOnlyMemory<byte> data)
-    {
-        var seq = (ushort)Interlocked.Increment(ref _nextSequence);
-         
-        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (!_acks.TryAdd(seq, tcs))
-            throw new Exception($"Sequence {seq} already exists");
-            
-        var frame = new Frame(seq, FrameType.Data, data.ToArray());
-            
-        return (frame, tcs);
     }
 
     private async Task SendFrameAsync(Frame frame, CancellationToken cancellationToken)
     {
         var buffer = new byte[_framer.GetFrameSize(frame.Data.Length)];
         var size = _framer.ToBytes(frame, buffer);
-            
+
         await _transport.WriteAsync(buffer.AsMemory()[..size], cancellationToken);
     }
     
@@ -185,7 +158,7 @@ public sealed class FrameProtocol : IFrameProtocol, IAsyncDisposable
             switch (frame.Type)
             {
                 case FrameType.ACK:
-                    ProcessAckFrame(frame);
+                    await ProcessAckFrameAsync(frame, cancellationToken);
                     break;
                 case FrameType.Data:
                     await ProcessDataFrameAsync(frame, cancellationToken);
@@ -197,37 +170,31 @@ public sealed class FrameProtocol : IFrameProtocol, IAsyncDisposable
         }
     }
 
-    private void ProcessAckFrame(Frame frame)
+    private async Task ProcessAckFrameAsync(Frame frame, CancellationToken cancellationToken)
     {
-        if (_acks.TryRemove(frame.Sequence, out var tcs))
+        using (await _sendSync.EnterAsync(cancellationToken))
         {
-            _logger.LogDebug("Sequence {Sequence} acked", frame.Sequence);
-            tcs.TrySetResult();
-        }
-        else
-        {
-            _logger.LogWarning("Sequence {Sequence} does not exist", frame.Sequence);
+            _lastAckSequence = frame.Sequence;
+            _sendSync.PulseAll();
         }
     }
 
     private async Task ProcessDataFrameAsync(Frame frame, CancellationToken cancellationToken)
     {
         _logger.LogDebug("New frame, sequence: {Sequence}, type: {Type}, size: {Size}", frame.Sequence, frame.Type, frame.Data.Length);
-                
-        var ackFrame = new Frame(frame.Sequence, FrameType.ACK);
-        await SendFrameAsync(ackFrame, cancellationToken);
 
-        var lastReadSequence = Interlocked.Read(ref _lastReadSequence);
-                    
-        if (frame.Sequence > lastReadSequence || (frame.Sequence == 0 && lastReadSequence is ushort.MaxValue or 0))
+        if (frame.Sequence == _lastReadSequence && _lastReadSequence > 0)
         {
-            Interlocked.CompareExchange(ref _lastReadSequence, frame.Sequence, lastReadSequence);
-            await _frames.Writer.WriteAsync(frame, cancellationToken);
+            _logger.LogDebug("Ignore duplicate frame {Sequence}", frame.Sequence);
+            return;
         }
-        else if (frame.Sequence < lastReadSequence) // frame.Sequence == lastReadSequence is a retry, no need to spam logs with it
-        {
-            _logger.LogWarning("Sequence {Sequence} past last acked sequence {PastSequence}, skipping...", frame.Sequence, lastReadSequence);
-        }
+
+        _lastReadSequence = frame.Sequence;
+        
+        var ackFrame = new Frame(frame.Sequence, FrameType.ACK);
+        
+        await SendFrameAsync(ackFrame, cancellationToken);
+        await _frames.Writer.WriteAsync(frame, cancellationToken);
     }
 
     private Task TransportOnOnReconnectedAsync(CancellationToken arg)

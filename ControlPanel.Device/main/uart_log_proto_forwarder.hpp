@@ -11,7 +11,7 @@
 #include "esp_rom_sys.h"
 
 #include "esp_utility.hpp"
-#include "uart.hpp"
+#include "protocol/frame_host_connection.hpp"
 #include "protocol.hpp"
 
 class uart_log_proto_forwarder
@@ -26,17 +26,15 @@ class uart_log_proto_forwarder
     };
 
 public:
-    static void init(uart_t* uart)
+    static void init(auto& fp)
     {
-        _uart = uart;
+        _send = [&](auto d) { fp.send(d, 100, 1); };
         _queue = xQueueCreateStatic(LOG_QUEUE_LEN, sizeof(log_line_t), _storage, &_static_queue);
 
         xTaskCreate(log_forward_task, "log_fwd", 4096, nullptr, tskIDLE_PRIORITY + 1, &_log_task);
 
         esp_log_set_vprintf(&log_vprintf_hook);
     }
-
-
 private:
     static int log_vprintf_hook(const char* fmt, va_list ap)
     {
@@ -115,11 +113,11 @@ private:
             msg.line = std::string(line.buf, line.len);
 
             {
-                auto send_ll = scoped_log_disable(uart_t::SEND_TAG);
-                auto sz_ll = scoped_log_disable(uart_t::SEND_TAG);
+                //auto send_ll = scoped_log_disable(uart_t::SEND_TAG);
+                //auto sz_ll = scoped_log_disable(uart_t::SEND_TAG);
 
                 auto bytes = serialize_bridge_message(msg);
-                _uart->send_data(bytes, 1000, 1);
+                _send(bytes);
             }
         }
     }
@@ -130,5 +128,5 @@ private:
     inline static QueueHandle_t _queue = nullptr;
     inline static volatile bool _in_hook = 0;
     inline static TaskHandle_t _log_task = nullptr;
-    inline static uart_t* _uart;
+    inline static std::function<void(std::span<uint8_t>)> _send;
 };

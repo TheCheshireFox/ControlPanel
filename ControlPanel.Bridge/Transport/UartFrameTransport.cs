@@ -1,5 +1,3 @@
-using System.IO.Ports;
-using System.Text;
 using System.Threading.Channels;
 using ControlPanel.Bridge.Extensions;
 using ControlPanel.Bridge.Framer;
@@ -7,36 +5,34 @@ using ControlPanel.Bridge.Options;
 using ControlPanel.Shared;
 using Microsoft.Extensions.Options;
 
-namespace ControlPanel.Bridge.Uart;
+namespace ControlPanel.Bridge.Transport;
 
 public sealed class UartFrameTransport : IFrameTransport, IAsyncDisposable
 {
-    private readonly string _device;
-    private readonly int _baud;
+    private readonly ITransportStreamProvider _streamProvider;
     private readonly TimeSpan _reconnectInterval;
     private readonly ILogger<UartFrameTransport> _logger;
-    private readonly CancellableTask _serialLoop;
+    private readonly CancellableTask _connectionLoop;
 
-    private readonly BlockingQueue<MemoryRentBlock> _fromSerial = new();
-    private readonly Channel<MemoryRentBlock> _toSerial = Channel.CreateUnbounded<MemoryRentBlock>(new UnboundedChannelOptions{ SingleReader = true });
+    private readonly BlockingQueue<MemoryRentBlock> _fromStream = new();
+    private readonly Channel<MemoryRentBlock> _toStream = Channel.CreateUnbounded<MemoryRentBlock>(new UnboundedChannelOptions{ SingleReader = true });
     
     public event Func<CancellationToken, Task>? OnReconnectedAsync;
     
-    public UartFrameTransport(IOptions<UartOptions> options, ILogger<UartFrameTransport> logger)
+    public UartFrameTransport(IOptions<TransportOptions> options, ITransportStreamProvider streamProvider, ILogger<UartFrameTransport> logger)
     {
-        _device = options.Value.Tty;
-        _baud = options.Value.BaudRate;
-        _reconnectInterval = options.Value.ReconnectInterval;
+        _streamProvider = streamProvider;
         _logger = logger;
+        _reconnectInterval = options.Value.ReconnectInterval;
         
-        _serialLoop = new CancellableTask(SerialLoopAsync);
+        _connectionLoop = new CancellableTask(ConnectionLoopAsync);
     }
 
     public async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken)
     {
         var count = 0;
         
-        await _fromSerial.TakeOrReplaceAsync(block =>
+        await _fromStream.TakeOrReplaceAsync(block =>
         {
             count = Math.Min(buffer.Length, block.Data.Length);
             block.Data[..count].CopyTo(buffer);
@@ -58,36 +54,23 @@ public sealed class UartFrameTransport : IFrameTransport, IAsyncDisposable
         using var disposables = new Disposables(block);
 
         buffer.CopyTo(block.Data);
-        await _toSerial.Writer.WriteAsync(block, cancellationToken);
+        await _toStream.Writer.WriteAsync(block, cancellationToken);
         
         disposables.Detach();
     }
     
-    private async Task SerialLoopAsync(CancellationToken cancellationToken)
+    private async Task ConnectionLoopAsync(CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            SerialPort? port = null;
-
             try
             {
-                port = new SerialPort(_device, _baud)
-                {
-                    Parity = Parity.None,
-                    DataBits = 8,
-                    StopBits = StopBits.One,
-                    Handshake = Handshake.None,
-                    Encoding = Encoding.UTF8,
-                    ReadTimeout = -1,
-                    WriteTimeout = -1
-                };
-            
-                port.Open();
-                var stream = port.BaseStream;
+                using var transportStream = await _streamProvider.OpenStreamAsync(cancellationToken);
+                var stream = transportStream.Stream;
 
                 await OnReconnectedAsync.InvokeAllAsync(cancellationToken);
                 
-                _logger.LogInformation("UART {Device} opened.", _device);
+                _logger.LogInformation("Stream opened.");
 
                 var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 Task[] tasks =
@@ -102,10 +85,9 @@ public sealed class UartFrameTransport : IFrameTransport, IAsyncDisposable
             }
             catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
             {
-                _logger.LogWarning(ex, "UART {Device} error.", _device);
+                _logger.LogWarning(ex, "Stream error.");
             }
 
-            port?.Dispose();
             await Task.Delay(_reconnectInterval, cancellationToken);
         }
     }
@@ -121,7 +103,7 @@ public sealed class UartFrameTransport : IFrameTransport, IAsyncDisposable
             if (read <= 0)
                 return;
 
-            await _fromSerial.EnqueueAsync(block, cancellationToken);
+            await _fromStream.EnqueueAsync(block with { Data = block.Data[..read] }, cancellationToken);
             
             disposables.Detach();
         }
@@ -129,7 +111,7 @@ public sealed class UartFrameTransport : IFrameTransport, IAsyncDisposable
 
     private async Task WriteAsync(Stream stream, CancellationToken cancellationToken)
     {
-        await foreach (var block in _toSerial.Reader.ReadAllAsync(cancellationToken))
+        await foreach (var block in _toStream.Reader.ReadAllAsync(cancellationToken))
         {
             using (block)
             {
@@ -141,6 +123,6 @@ public sealed class UartFrameTransport : IFrameTransport, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await _serialLoop.DisposeAsync();
+        await _connectionLoop.DisposeAsync();
     }
 }

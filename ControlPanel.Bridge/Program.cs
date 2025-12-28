@@ -3,7 +3,7 @@ using System.Text;
 using ControlPanel.Bridge.Agent;
 using ControlPanel.Bridge.Framer;
 using ControlPanel.Bridge.Options;
-using ControlPanel.Bridge.Uart;
+using ControlPanel.Bridge.Transport;
 using ControlPanel.Shared;
 using ControlPanel.Shared.Logging;
 using ControlPanel.WebSocket;
@@ -15,7 +15,7 @@ public class Program
     public static async Task Main(string[] args)
     {
         SetUpEncoding();
-        
+
         var app = BuildWebApplication(args);
         
         app.UseWebSockets(new WebSocketOptions{ KeepAliveInterval = TimeSpan.FromSeconds(30) });
@@ -89,6 +89,8 @@ public class Program
         
         builder.Services.AddSystemd();
 
+        builder.Services.Configure<TransportOptions>(builder.Configuration.GetSection("Transport"));
+        builder.Services.Configure<BtRfcommOptions>(builder.Configuration.GetSection("BtRfcomm"));
         builder.Services.Configure<UartOptions>(builder.Configuration.GetSection("Uart"));
         builder.Services.Configure<TextRendererOptions>(builder.Configuration.GetSection("TextRenderer"));
         builder.Services.Configure<AudioStreamIconCacheOptions>(builder.Configuration.GetSection("IconCache"));
@@ -103,11 +105,31 @@ public class Program
         builder.Services.AddSingleton<IAudioStreamIconCache, AudioStreamIconCache>();
         builder.Services.AddSingleton<IFrameTransport, UartFrameTransport>();
         builder.Services.AddSingleton<IFrameProtocol, FrameProtocol>();
+
+        AddTransportStreamProvider(builder);
+        
         builder.Services.AddHostedService(sp => sp.GetRequiredService<ControlPanelBridge>());
 
         return builder.Build();
     }
-    
+
+    private static void AddTransportStreamProvider(IHostApplicationBuilder builder)
+    {
+        var cfg = builder.Configuration.GetSection("Transport").Get<TransportOptions>() ?? throw new InvalidOperationException("Transport config section not found");
+
+        switch (cfg.Type)
+        {
+            case TransportType.Serial:
+                builder.Services.AddSingleton<ITransportStreamProvider, SerialPortTransportStreamProvider>();
+                break;
+            case TransportType.BtRfcomm:
+                builder.Services.AddSingleton<ITransportStreamProvider, BrRfcommTransportStreamProvider>();
+                break;
+            default:
+                throw new InvalidOperationException($"TransportType {cfg.Type} not supported");
+        }
+    }
+
     private static void SetUpEncoding()
     {
         Encoding.RegisterProvider(new AliasEncodingProvider(new Dictionary<string, Encoding>

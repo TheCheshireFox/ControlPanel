@@ -1,0 +1,4 @@
+[submodule "ControlPanel.Device/main/lib/etl"]
+	path = ControlPanel.Device/main/lib/etl
+	url = https://github.com/ETLCPP/etl.git
+	branch = master

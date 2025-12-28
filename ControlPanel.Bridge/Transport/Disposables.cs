@@ -1,4 +1,4 @@
-namespace ControlPanel.Bridge.Uart;
+namespace ControlPanel.Bridge.Transport;
 
 internal sealed class Disposables : IDisposable
 {

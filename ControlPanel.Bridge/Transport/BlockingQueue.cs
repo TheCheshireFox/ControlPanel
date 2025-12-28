@@ -1,6 +1,6 @@
 using Nito.AsyncEx;
 
-namespace ControlPanel.Bridge.Uart;
+namespace ControlPanel.Bridge.Transport;
 
 internal class BlockingQueue<T>
 {

@@ -56,10 +56,6 @@ public:
         lv_obj_add_event_cb(_mute_click_area, on_mute_click_raw, LV_EVENT_CLICKED, this);
 
         set_grid_layout(parent);
-
-        lv_obj_update_layout(parent);
-        lv_area_t coords;
-        lv_obj_get_coords(_mute_click_area, &coords);
     }
 
     void set_app_image(lv_color_format_t format, uint32_t w, uint32_t h, std::span<const uint8_t> data)

@@ -12,6 +12,8 @@
 #include "driver/uart.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "nvs.h"
+#include "nvs_flash.h"
 #include "sdkconfig.h"
 
 #include "lvgl.h"
@@ -20,11 +22,14 @@
 #include "waveshare_st7789.hpp"
 #include "volume_display.hpp"
 #include "backlight_timer.hpp"
-#include "uart.hpp"
 #include "uart_log_proto_forwarder.hpp"
 #include "lv_sync.hpp"
 #include "lvgl_logging.hpp"
+
+#include "protocol/frame_host_connection.hpp"
 #include "protocol.hpp"
+
+#include "frame_transport_selector.hpp"
 
 static constexpr char TAG[] = "main";
 
@@ -64,11 +69,25 @@ static constexpr char TAG[] = "main";
 #define BL_TIMER_LONG  uint64_t(3600 * 1000)
 #define BL_TIMER_SHORT uint64_t(30 * 1000)
 
+static constexpr std::array<uint8_t, 2> MAGIC{0x19, 0x16};
 static std::optional<cst328_driver_t> cst328_driver;
 static std::optional<waveshare_st7789_t> st7789_driver;
 static std::optional<volume_display_t> volume_display;
 static std::optional<backlight_timer_t<waveshare_st7789_t>> backlight_timer;
-static std::optional<uart_t> uart;
+
+using ft_type = ft_select<ft_t::bt_uart>::type;
+static std::optional<ft_type> frame_transport;
+static std::optional<transport::frame_host_connection_t<ft_type, MAGIC>> host_connection;
+
+static void nvs_init()
+{
+    auto ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
+}
 
 static void spi_bus_init(void)
 {
@@ -171,17 +190,34 @@ static void lvgl_timer_init()
     ESP_LOGI(TAG, "LVGL timer started");
 }
 
-void uart_init(void)
+template<typename TFrameTransport>
+void host_connection_init(std::optional<TFrameTransport>& ft)
 {
-    uart.emplace(UART_PORT, UART_TX, UART_RX, UART_BUF_SIZE, UART_BAUDRATE);
-    uart->init();
+    if constexpr (std::is_same_v<TFrameTransport, transport::uart_transport_t>)
+    {
+        ft.emplace(UART_PORT, UART_TX, UART_RX, UART_BUF_SIZE, UART_BAUDRATE);
+        uart_log_proto_forwarder::init(host_connection.value());
+    }
+    else if constexpr (std::is_same_v<TFrameTransport, transport::bt_uart_transport_t>)
+    {
+        ft.emplace("control panel", "control panel");
+    }
+    else
+    {
+        static_assert(!sizeof(TFrameTransport*), "frame transport is not initialized");
+    }
 
-    ESP_LOGI(TAG, "UART initialized");
+    ft->init();
+
+    host_connection.emplace(*ft);
+    host_connection->init();
+
+    ESP_LOGI(TAG, "Frame processor initialized");
 }
 
-void uart_register_handler()
+void host_connection_register_handler()
 {
-    uart->register_data_handler(+[](std::span<const uint8_t> data)
+    host_connection->register_data_handler(+[](std::span<const uint8_t> data)
     {
         backlight_timer->kick();
 
@@ -229,8 +265,8 @@ static lv_display_t* st7789_create_lvgl_display()
 
 extern "C" void app_main(void)
 {
-    uart_init();
-    uart_log_proto_forwarder::init(&uart.value());
+    nvs_init();
+    host_connection_init(frame_transport);
 
     ESP_LOGI(TAG, "Starting app_main...");
 
@@ -244,28 +280,28 @@ extern "C" void app_main(void)
     volume_display.emplace(0, 0, LV_PCT(100), LV_PCT(100));
     volume_display->on_volume_change(+[](const event_id& id, float volume)
     {
-        uart->send_data(serialize_bridge_message(set_volume_message_t {
+        host_connection->send(serialize_bridge_message(set_volume_message_t {
             .id = { id.id, id.agent_id },
             .volume = volume
         }));
     });
     volume_display->on_mute_change(+[](const event_id& id, bool mute)
     {
-        uart->send_data(serialize_bridge_message(set_mute_message_t {
+        host_connection->send(serialize_bridge_message(set_mute_message_t {
             .id = { id.id, id.agent_id },
             .mute = mute
         }));
     });
     volume_display->on_icon_missing(+[](const std::string& source, const std::string& agent_id)
     {
-        uart->send_data(serialize_bridge_message(get_icon_message_t {
+        host_connection->send(serialize_bridge_message(get_icon_message_t {
             .source = source,
             .agent_id = agent_id
         }));
     });
 
-    uart_register_handler();
-    uart->send_data(serialize_bridge_message(request_refresh_message_t{}), 1000, std::numeric_limits<uint32_t>::max());
+    host_connection_register_handler();
+    host_connection->send(serialize_bridge_message(request_refresh_message_t{}), 1000, std::numeric_limits<uint32_t>::max());
 
     ESP_LOGI(TAG, "Initialization completed");
 }

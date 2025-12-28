@@ -42,7 +42,15 @@ public class ControlPanelBridge : BackgroundService
         var msg = new UartStreamsMessage(updated, deleted);
         
         _logger.LogDebug("Sending streams, updated: {Updated}, deleted: {Deleted}", updated.Length, deleted.Length);
-        await _controllerConnection.SendMessageAsync(msg, cancellationToken);
+
+        try
+        {
+            await _controllerConnection.SendMessageAsync(msg, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error while sending streams");
+        }
     }
 
     private async Task ProcessCommandsAsync(CancellationToken cancellationToken)

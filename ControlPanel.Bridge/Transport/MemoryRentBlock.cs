@@ -1,6 +1,6 @@
 using System.Buffers;
 
-namespace ControlPanel.Bridge.Uart;
+namespace ControlPanel.Bridge.Transport;
 
 internal sealed record MemoryRentBlock : IDisposable
 {

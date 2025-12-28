@@ -15,7 +15,6 @@ public class ControllerConnection : IControllerConnection
     private static readonly UartMessageSerializer _serializer = new();
 
     private readonly TimeSpan _timeout = TimeSpan.FromSeconds(5);
-    private readonly TimeSpan _retryDelay = TimeSpan.FromSeconds(2);
     private readonly int _retryCount = 3;
     
     private readonly IFrameProtocol _protocol;
@@ -52,6 +51,6 @@ public class ControllerConnection : IControllerConnection
 
     public async Task SendMessageAsync<T>(T message, CancellationToken cancellationToken) where T : UartMessage
     {
-        await _protocol.SendAsync(_serializer.Serialize(message), _timeout, _retryCount, _retryDelay, cancellationToken);
+        await _protocol.SendAsync(_serializer.Serialize(message), _timeout, _retryCount, cancellationToken);
     }
 }
