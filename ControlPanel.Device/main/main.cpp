@@ -19,7 +19,9 @@
 #include "lvgl.h"
 
 #include "cst328_driver.hpp"
+#include "cst328_lvgl.hpp"
 #include "waveshare_st7789.hpp"
+#include "waveshare_st7789_lvgl.hpp"
 #include "volume_display.hpp"
 #include "backlight_timer.hpp"
 #include "uart_log_proto_forwarder.hpp"
@@ -101,65 +103,42 @@ static void spi_bus_init(void)
     ESP_ERROR_CHECK(spi_bus_initialize(SPI3_HOST, &buscfg, SPI_DMA_CH_AUTO));
 }
 
-static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
-{
-    const uint32_t TOUCH_TIMEOUT_MS = 40;
-
-    (void)indev;
-
-    if (!cst328_driver) {
-        data->state = LV_INDEV_STATE_RELEASED;
-        return;
-    }
-
-    auto pt = cst328_driver->get_touch();
-    auto touched = ((esp_timer_get_time() / 1000) - pt.last_touch_ms) < TOUCH_TIMEOUT_MS;
-
-    data->state = touched ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
-
-    switch (st7789_driver->orientation())
-    {
-        case waveshare_st7789_t::orientation_t::portrait:
-            data->point.x = pt.x;
-            data->point.y = pt.y;
-            break;
-        case waveshare_st7789_t::orientation_t::landscape:
-            data->point.x = pt.y;
-            data->point.y = st7789_driver->height() - pt.x;
-            break;
-    }
-
-    data->point.x = LV_CLAMP(0, data->point.x, (int32_t)st7789_driver->width());
-    data->point.y = LV_CLAMP(0, data->point.y, (int32_t)st7789_driver->height());
-}
-
 void touch_init_for_lvgl(void)
 {
-    static auto touch_indev = lv_indev_create();
-    lv_indev_set_type(touch_indev, LV_INDEV_TYPE_POINTER);
-    lv_indev_set_read_cb(touch_indev, touch_read_cb);
+    auto [invert_x, invert_y, swap_xy] = std::tuple{false, false, false};
+    switch (st7789_driver->orientation())
+    {
+        case orientation_t::portrait:
+            std::tie(invert_x, invert_y, swap_xy) = std::tuple{false, false, false};
+            break;
+        case orientation_t::landscape:
+            std::tie(invert_x, invert_y, swap_xy) = std::tuple{false, true, true};
+            break;
+    }
+
+    cts328::lvgl_create_indev(&cst328_driver.value(), invert_x, invert_y, swap_xy);
 
     ESP_LOGI(TAG, "LVGL touch initialized");
 }
 
-void panel_init(void)
+void driver_init(void)
 {
     ESP_ERROR_CHECK(gpio_install_isr_service(0));
 
     spi_bus_init();
 
     cst328_driver.emplace(I2C_TOUCH_PORT, I2C_TOUCH_FREQ_HZ, PIN_TOUCH_SDA, PIN_TOUCH_SCL, PIN_TOUCH_INT);
-    st7789_driver.emplace(SPI3_HOST, PIN_LCD_CS, PIN_LCD_DC, PIN_LCD_RST, PIN_LCD_BL, LCD_HEIGHT, LCD_WIDTH, LCD_SPI_CLOCK, waveshare_st7789_t::orientation_t::landscape);
+    st7789_driver.emplace(SPI3_HOST, PIN_LCD_CS, PIN_LCD_DC, PIN_LCD_RST, PIN_LCD_BL, LCD_HEIGHT, LCD_WIDTH, LCD_SPI_CLOCK, orientation_t::landscape);
     backlight_timer.emplace(*st7789_driver, BL_TIMER_SHORT);
     
-    cst328_driver->on_touch(+[](const touch_point_t& pt) { backlight_timer->kick(); });
+    cst328_driver->on_touch(+[](const touch_point_t&) { backlight_timer->kick(); });
     cst328_driver->init();
     backlight_timer->init();
     st7789_driver->init();
     
     st7789_driver->backlight(true);
 
-    ESP_LOGI(TAG, "Panel (LCD + touch + BL) initialized");
+    ESP_LOGI(TAG, "Drivers initialized");
 }
 
 static void lvgl_init_core()
@@ -241,17 +220,11 @@ void host_connection_register_handler()
 
 static lv_display_t* st7789_create_lvgl_display()
 {
-    assert(st7789_driver);
+    configASSERT(st7789_driver);
 
-    const auto hor_res = st7789_driver->width();
-    const auto ver_res = st7789_driver->height();
+    auto disp = waveshare_st7789::lvgl_create_display(&st7789_driver.value());
 
-    auto disp = lv_display_create(hor_res, ver_res);
-    lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565);
-
-    st7789_driver->register_flush_cb(disp);
-
-    const size_t buf_bytes = hor_res * ver_res / 5 * LV_COLOR_FORMAT_GET_SIZE(LV_COLOR_FORMAT_RGB565);
+    const size_t buf_bytes = st7789_driver->width() * st7789_driver->height() / 5 * LV_COLOR_FORMAT_GET_SIZE(LV_COLOR_FORMAT_RGB565);
     auto buf = static_cast<lv_color_t*>(heap_caps_malloc(buf_bytes, MALLOC_CAP_DMA));
     configASSERT(buf);
 
@@ -269,7 +242,7 @@ extern "C" void app_main(void)
 
     ESP_LOGI(TAG, "Starting app_main...");
 
-    panel_init();
+    driver_init();
     lvgl_init_core();
     auto disp = st7789_create_lvgl_display();
     touch_init_for_lvgl();

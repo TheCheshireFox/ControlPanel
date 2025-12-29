@@ -14,16 +14,16 @@
 
 #include "lvgl.h"
 
+enum class orientation_t {
+    portrait,
+    landscape,
+};
+
 class waveshare_st7789_t
 {
     static constexpr const char *TAG = "ST7789";
 
 public:
-    enum class orientation_t {
-        portrait,
-        landscape,
-    };
-
     waveshare_st7789_t(spi_host_device_t spi_host, gpio_num_t cs, gpio_num_t dc, gpio_num_t rst, gpio_num_t bl,
             uint32_t width = 240, uint32_t height = 320, int spi_clock_hz = 40000000, orientation_t orientation = orientation_t::portrait)
         : _spi_host(spi_host),
@@ -60,46 +60,22 @@ public:
         }
     }
 
-    inline void flush(lv_display_t *disp, const lv_area_t *area, lv_color16_t *color_p)
+    void draw(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, const uint8_t* buffer, uint32_t size)
     {
         std::unique_lock lock{_sync};
 
-        LV_UNUSED(disp);
-
-        uint16_t x0 = area->x1;
-        uint16_t y0 = area->y1;
-        uint16_t x1 = area->x2;
-        uint16_t y1 = area->y2;
-
         set_window(x0, y0, x1, y1);
-
-        int32_t total_pixels = lv_area_get_size(area);
-        int32_t total_bytes  = total_pixels * sizeof(lv_color16_t);
-
-        lv_draw_sw_rgb565_swap(color_p, total_pixels);
-
-        const uint8_t *buf = reinterpret_cast<const uint8_t *>(color_p);
 
         set_dc(true);
 
         spi_transaction_t t = {};
-        t.length    = total_bytes * 8;
-        t.tx_buffer = buf;
+        t.length    = size * 8;
+        t.tx_buffer = buffer;
 
         esp_err_t err = spi_device_transmit(_spi_dev, &t);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "flush transmit failed: %s", esp_err_to_name(err));
         }
-
-        lv_display_flush_ready(disp);
-    }
-
-    inline void register_flush_cb(lv_display_t* disp)
-    {
-        std::unique_lock lock{_sync};
-
-        lv_display_set_flush_cb(disp, lvgl_flush_cb);
-        lv_display_set_user_data(disp, this);
     }
 
     inline uint32_t width()  const { return _width;  }
@@ -107,17 +83,6 @@ public:
     inline orientation_t orientation() const { return _orientation; }
 
 private:
-    static inline void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, unsigned char *px_map)
-    {
-        auto self = static_cast<waveshare_st7789_t*>(lv_display_get_user_data(disp));
-        if (!self) {
-            lv_display_flush_ready(disp);
-            return;
-        }
-
-        self->flush(disp, area, reinterpret_cast<lv_color16_t*>(px_map));
-    }
-
     inline void delay_ms(uint32_t ms)
     {
         vTaskDelay(pdMS_TO_TICKS(ms));

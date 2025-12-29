@@ -20,8 +20,12 @@ struct touch_point_t {
 class cst328_driver_t {
     static constexpr char TAG[] = "CST328";
     static constexpr uint8_t CST328_I2C_ADDR = 0x1A;
-    static constexpr uint16_t CST328_REG_NUM = 0xD005;
     static constexpr uint16_t CST328_REG_XY = 0xD000;
+    static constexpr uint16_t CST328_REG_NUM = 0xD005;
+    static constexpr uint16_t CST328_REG_DEBUG_INFO = 0xD101;
+    static constexpr uint16_t CST328_REG_RECALIB = 0xD104;
+    static constexpr uint16_t CST328_REG_NORMAL_MODE = 0xD109;
+    static constexpr uint16_t CST328_REG_RES = 0xD1F8;
     static constexpr uint16_t CST328_REG_CONFIG = 0x8047;
 
 public:
@@ -78,15 +82,26 @@ public:
         {
             ESP_LOGI(TAG, "Calibrating...");
 
-            uint8_t cmd = 0x04;
-            ESP_ERROR_CHECK(cst328_reg_write(0xD104, &cmd, 1));
+            ESP_ERROR_CHECK(cst328_cmd_write(CST328_REG_RECALIB));
 
             vTaskDelay(pdMS_TO_TICKS(250));
 
             ESP_LOGI(TAG, "Calibrated");
         }
 
+        read_resolution(_width, _height);
+
         ESP_LOGI(TAG, "Initialized");
+    }
+
+    uint16_t width() const 
+    {
+        return _width;
+    }
+
+    uint16_t height() const 
+    {
+        return _height;
     }
 
     touch_point_t get_touch() {
@@ -117,6 +132,18 @@ public:
     }
 
 private:
+    void read_resolution(uint16_t& width, uint16_t& height)
+    {
+        ESP_ERROR_CHECK(cst328_cmd_write(CST328_REG_DEBUG_INFO));
+
+        uint8_t buf[4] = {0};
+        ESP_ERROR_CHECK(cst328_reg_read(CST328_REG_RES, buf, sizeof(buf)));
+        width = uint16_t(buf[0]) | uint16_t(buf[1]) << 8;
+        height = uint16_t(buf[2]) | uint16_t(buf[3]) << 8;
+
+        ESP_ERROR_CHECK(cst328_cmd_write(CST328_REG_NORMAL_MODE));
+    }
+
     static void IRAM_ATTR touch_int_isr(void *task_handle)
     {
         BaseType_t xHigherPriorityTaskWoken = pdFALSE;
@@ -157,6 +184,12 @@ private:
         };
 
         return i2c_master_transmit_receive(_dev, reg_bytes, sizeof(reg_bytes), data, len, 1000);
+    }
+
+    esp_err_t cst328_cmd_write(uint16_t reg)
+    {
+        uint8_t cmd = reg & 0xFF;
+        return cst328_reg_write(reg, &cmd, 1);
     }
 
     esp_err_t cst328_reg_write(uint16_t reg, const uint8_t *data, size_t len)
@@ -203,4 +236,6 @@ private:
     std::function<void(const touch_point_t&)> _on_touch;
     const bool _interrupt;
     i2c_master_dev_handle_t _dev;
+    uint16_t _width;
+    uint16_t _height;
 };
