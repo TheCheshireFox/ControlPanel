@@ -6,8 +6,6 @@ using ControlPanel.Agent.Shared;
 using ControlPanel.Shared;
 using ControlPanel.Shared.Extensions;
 
-// ReSharper disable ClassNeverInstantiated.Local
-
 namespace ControlPanel.Agent.Linux;
 
 internal record PipeWireNodeProps(
@@ -35,6 +33,13 @@ internal static class DictionaryExtension
 
 internal class PipeWireAudioAgent : IAudioAgent
 {
+    private readonly IIconLocator _iconLocator;
+
+    public PipeWireAudioAgent(IIconLocator iconLocator)
+    {
+        _iconLocator = iconLocator;
+    }
+
     public Task<AudioAgentDescription> GetAudioAgentDescription()
     {
         return Task.FromResult(new AudioAgentDescription(
@@ -69,17 +74,17 @@ internal class PipeWireAudioAgent : IAudioAgent
     public async Task SetVolumeAsync(string id, double volume, CancellationToken cancellationToken)
     {
         volume = Math.Pow(volume, 3); // from cubic to linear
-        await ProcessExecAsync("pw-cli", ["s", id, "Props", $"{{channelVolumes: [{volume:F2}, {volume:F2}]}}"],  cancellationToken);
+        await ProcessExecAsync("pw-cli", ["s", id, "Props", $"{{channelVolumes: [{volume:F2}, {volume:F2}]}}"], cancellationToken);
     }
 
     public async Task ToggleMuteAsync(string id, bool mute, CancellationToken cancellationToken)
     {
-        await ProcessExecAsync("pw-cli", ["s", id, "Props", $"{{mute: {(mute ? "true" : "false")}}}"],  cancellationToken);
+        await ProcessExecAsync("pw-cli", ["s", id, "Props", $"{{mute: {(mute ? "true" : "false")}}}"], cancellationToken);
     }
 
     public async Task<AudioStreamIcon> GetAudioStreamIconAsync(string source, CancellationToken cancellationToken)
     {
-        var icon = IconLocator.FindIcon(source);
+        var icon = _iconLocator.FindIcon(source);
         
         return string.IsNullOrEmpty(icon)
             ? AudioStreamIcon.Default
@@ -106,13 +111,11 @@ internal class PipeWireAudioAgent : IAudioAgent
         if (string.IsNullOrWhiteSpace(mediaName))
             return true;
 
-        // identical to app/description → not adding info
         if (!string.IsNullOrWhiteSpace(appName) && mediaName == appName)
             return true;
         if (!string.IsNullOrWhiteSpace(nodeDesc) && mediaName == nodeDesc)
             return true;
         
-        // a few PipeWire-ish boring names — purely agent-local
         return mediaName is "Audio Stream" or "audio stream" or "Playback Stream"
                || mediaName.StartsWith("audio") && (nodeName?.StartsWith("qemu") ?? false);
     }
@@ -137,7 +140,6 @@ internal class PipeWireAudioAgent : IAudioAgent
         var nodeDesc = props.GetProperty<string>("node.description");
         var nodeName = props.GetProperty<string>("node.name");
 
-        // 1) media.name when it seems specific
         if (!IsGenericName(mediaName, appName, nodeDesc, nodeName))
         {
             return !string.IsNullOrWhiteSpace(appName)
@@ -145,15 +147,12 @@ internal class PipeWireAudioAgent : IAudioAgent
                 : mediaName!;
         }
 
-        // 2) node.description is usually nice for devices
         if (!string.IsNullOrWhiteSpace(nodeDesc))
             return nodeDesc;
 
-        // 3) fall back to application.name
         if (!string.IsNullOrWhiteSpace(appName))
             return appName;
 
-        // 4) last resort: node.name or id
         if (!string.IsNullOrWhiteSpace(nodeName))
             return nodeName;
 

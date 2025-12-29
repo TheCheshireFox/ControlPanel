@@ -6,7 +6,7 @@ internal partial class IconIndex
 {
     private record IconInfo(int Size, string Extension, string Theme, string Path);
     
-    private static readonly HashSet<string> _imageExtensions = new([".svg", ".png", ".xpm"],  StringComparer.InvariantCultureIgnoreCase);
+    private static readonly HashSet<string> _imageExtensions = new([".svg", ".png", ".xpm"], StringComparer.InvariantCultureIgnoreCase);
     private static readonly Regex _sizeRegex = SizeRegex();
     
     private static readonly string[] _iconSearchPaths = GetIconSearchPaths();

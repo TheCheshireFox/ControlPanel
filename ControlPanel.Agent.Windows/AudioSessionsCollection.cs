@@ -3,11 +3,11 @@ using NAudio.CoreAudioApi;
 
 namespace ControlPanel.Agent.Windows;
 
-internal sealed class AudioSessionsEnumerator : IEnumerable<AudioSessionControl>, IDisposable
+internal sealed class AudioSessionsCollection : IEnumerable<AudioSessionControl>, IDisposable
 {
     private readonly List<AudioSessionControl> _sessions = [];
 
-    public AudioSessionsEnumerator()
+    public AudioSessionsCollection()
     {
         var devEnumerator = new MMDeviceEnumerator();
 

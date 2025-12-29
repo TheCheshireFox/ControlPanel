@@ -60,7 +60,7 @@ public static class LvglImageConverter
                 for (var x = 0; x < w; x++)
                 {
                     var p = row[x];
-                    buf[idx++] = p.A; // just alpha channel
+                    buf[idx++] = p.A;
                 }
             }
         });

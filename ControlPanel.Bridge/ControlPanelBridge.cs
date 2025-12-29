@@ -25,7 +25,21 @@ public class ControlPanelBridge : BackgroundService
         _audioStreamRepository.OnSnapshotChangedAsync += OnStreamsUpdateAsync;
         try
         {
-            await Task.WhenAll(ProcessCommandsAsync(stoppingToken));
+            await foreach (var message in _controllerConnection.ReadMessagesAsync(stoppingToken))
+            {
+                try
+                {
+                    await _commandHandler.HandleAsync(message, stoppingToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error while processing commands");
+                }
+            }
         }
         finally
         {
@@ -50,25 +64,6 @@ public class ControlPanelBridge : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error while sending streams");
-        }
-    }
-
-    private async Task ProcessCommandsAsync(CancellationToken cancellationToken)
-    {
-        await foreach (var message in _controllerConnection.ReadMessagesAsync(cancellationToken))
-        {
-            try
-            {
-                await _commandHandler.HandleAsync(message, cancellationToken);
-            }
-            catch (OperationCanceledException)
-            {
-                return;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex,  "Error while processing commands");
-            }
         }
     }
 }

@@ -46,8 +46,7 @@ public class Program
         try
         {
             using var webSocket = webSocketFactory.Create(ws);
-            var weClient = ActivatorUtilities.CreateInstance<TextWebSocketClient>(serviceProvider, webSocket);
-            connection = ActivatorUtilities.CreateInstance<AgentConnection>(serviceProvider, agentId, weClient);
+            connection = ActivatorUtilities.CreateInstance<AgentConnection>(serviceProvider, agentId, webSocket);
             
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(applicationLifetime.ApplicationStopping, context.RequestAborted);
             

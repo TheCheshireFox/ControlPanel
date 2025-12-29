@@ -26,7 +26,7 @@ public class AudioStreamIconCache : IAudioStreamIconCache
             SizeLimit = options.Value.CacheSizeKb * 1024
         });
 
-        _cacheExpiry =  options.Value.CacheExpiry;
+        _cacheExpiry = options.Value.CacheExpiry;
     }
 
     public bool TryGetIcon(string source, string agentId, out AudioCacheIcon icon)

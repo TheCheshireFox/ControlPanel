@@ -2,20 +2,35 @@ using System.Text.Json;
 using ControlPanel.Shared;
 using IniParser;
 using IniParser.Model;
+using Microsoft.Extensions.Logging;
 using Mono.Unix;
 
 namespace ControlPanel.Agent.Linux;
 
-public static class IconLocator
+internal enum DesktopEnv
+{
+    Unknown,
+    KDE
+}
+
+internal interface IIconLocator
+{
+    string? FindIcon(string program);
+    void RefreshCache();
+}
+
+internal class IconLocator : IIconLocator
 {
     private const string FallbackTheme = "hicolor";
     
-    private static readonly Dictionary<string, string> _appsIcons = new();
-    private static readonly Dictionary<string, string> _staticAppIcons;
-    private static readonly IconIndex _iconIndex;
+    private readonly ILogger<IconLocator> _logger;
+    private readonly Dictionary<string, string> _appsIcons = new();
+    private readonly Dictionary<string, string> _staticAppIcons;
+    private readonly IconIndex _iconIndex;
 
-    static IconLocator()
+    public IconLocator(ILogger<IconLocator> logger)
     {
+        _logger = logger;
         _iconIndex = new IconIndex([GetCurrentTheme(), FallbackTheme], iconSize: 32);
         _staticAppIcons = JsonSerializer.Deserialize<Dictionary<string, string>>(ResourceLoader.Load("Assets/static_icon_mapping.json"))
                           ?? throw new Exception("Unable to load static icons mapping");
@@ -23,7 +38,7 @@ public static class IconLocator
         RefreshCache();
     }
     
-    public static string? FindIcon(string program)
+    public string? FindIcon(string program)
     {
         var app = File.Exists(program)
             ? _appsIcons.FirstOrDefault(x => string.Equals(x.Key, program, StringComparison.InvariantCultureIgnoreCase))
@@ -32,7 +47,7 @@ public static class IconLocator
         return string.IsNullOrEmpty(app.Key) ? null : app.Value;
     }
 
-    public static void RefreshCache()
+    public void RefreshCache()
     {
         _iconIndex.Refresh();
         _appsIcons.Clear();
@@ -73,7 +88,20 @@ public static class IconLocator
             .Where(Directory.Exists);
     }
 
-    private static string GetCurrentTheme()
+    private string GetCurrentTheme()
+    {
+        var de = GetCurrentDesktopEnv();
+        switch (de)
+        {
+            case DesktopEnv.KDE:
+                return GetCurrentKDETheme();
+            default:
+                _logger.LogWarning("DE {DE} not supported, using fallback theme {Theme}", de, FallbackTheme);
+                return FallbackTheme;
+        }
+    }
+    
+    private static string GetCurrentKDETheme()
     {
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         
@@ -81,7 +109,7 @@ public static class IconLocator
         if (!File.Exists(kdeglobals))
             return FallbackTheme;
         
-        return ReadIniFile(kdeglobals).TryGetKey("Icons.Theme",  out var theme)
+        return ReadIniFile(kdeglobals).TryGetKey("Icons.Theme", out var theme)
             ? theme
             : FallbackTheme;
     }
@@ -128,7 +156,7 @@ public static class IconLocator
     
     private static IniData ReadIniFile(string path)
     {
-        var parser =  new FileIniDataParser
+        var parser = new FileIniDataParser
         {
             Parser =
             {
@@ -142,5 +170,14 @@ public static class IconLocator
         };
 
         return parser.ReadFile(path);
+    }
+
+    private static DesktopEnv GetCurrentDesktopEnv()
+    {
+        return Environment.GetEnvironmentVariable("XDG_CURRENT_DESKTOP") switch
+        {
+            "KDE" => DesktopEnv.KDE,
+            _ => DesktopEnv.Unknown
+        };
     }
 }

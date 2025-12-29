@@ -1,4 +1,6 @@
 using System.Net.WebSockets;
+using System.Runtime.CompilerServices;
+using System.Text;
 
 namespace ControlPanel.WebSocket;
 
@@ -22,12 +24,46 @@ public sealed class WebSocket : IWebSocket
     }
     
     public Task ConnectAsync(Uri uri, CancellationToken cancellationToken) => _connect(uri, cancellationToken);
-
-    public Task CloseAsync(WebSocketCloseStatus closeStatus, string statusDescription, CancellationToken cancellationToken) => _webSocket.CloseAsync(closeStatus, statusDescription, cancellationToken);
     
-    public Task SendAsync(ArraySegment<byte> buffer, CancellationToken cancellationToken) => _webSocket.SendAsync(buffer, WebSocketMessageType.Text, true, cancellationToken);
+    public async Task SendAsync(string message, CancellationToken cancellationToken)
+    {
+        await _webSocket.SendAsync(Encoding.UTF8.GetBytes(message), WebSocketMessageType.Text, true, cancellationToken);
+    }
 
-    public Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer, CancellationToken cancellationToken) =>  _webSocket.ReceiveAsync(buffer, cancellationToken);
+    public async IAsyncEnumerable<string> ReceiveAsync([EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var buffer = new byte[8192];
+
+        while (!cancellationToken.IsCancellationRequested && Connected)
+        {
+            using var ms = new MemoryStream();
+
+            WebSocketReceiveResult? result;
+            do
+            {
+                result = await _webSocket.ReceiveAsync(buffer, cancellationToken);
+
+                switch (result.MessageType)
+                {
+                    case WebSocketMessageType.Text:
+                        ms.Write(buffer, 0, result.Count);
+                        break;
+                    case WebSocketMessageType.Close:
+                        await _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "bye", cancellationToken);
+                        yield break;
+                    case WebSocketMessageType.Binary:
+                        throw new Exception("Unexpected binary message");
+                }
+
+            } while (!result.EndOfMessage);
+
+            var text = Encoding.UTF8.GetString(ms.ToArray());
+            if (string.IsNullOrWhiteSpace(text))
+                continue;
+
+            yield return text;
+        }
+    }
 
     public void Dispose() => _webSocket.Dispose();
 }

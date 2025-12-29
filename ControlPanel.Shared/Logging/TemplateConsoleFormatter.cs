@@ -87,7 +87,7 @@ public class TemplateConsoleFormatter : ConsoleFormatter
             LogLevel.Warning => "\e[33m",    // Yellow
             LogLevel.Error => "\e[31m",      // Red
             LogLevel.Critical => "\e[97;41m",// White on Red background
-            _ => ""                            // None => no color
+            _ => ""
         };
 
         return string.IsNullOrEmpty(color) ? text : $"{color}{text}{reset}";

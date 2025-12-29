@@ -34,7 +34,7 @@ internal sealed class WindowsAudioAgent : IAudioAgent, IDisposable
     {
         var result = new Dictionary<string, AudioStream>();
         
-        using var sessions = new AudioSessionsEnumerator();
+        using var sessions = new AudioSessionsCollection();
 
         foreach (var session in sessions.Where(x => x is { IsSystemSoundsSession: false, State: AudioSessionState.AudioSessionStateActive }))
         {
@@ -59,7 +59,7 @@ internal sealed class WindowsAudioAgent : IAudioAgent, IDisposable
 
     public async Task SetVolumeAsync(string id, double volume, CancellationToken cancellationToken)
     {
-        using var sessions = new AudioSessionsEnumerator();
+        using var sessions = new AudioSessionsCollection();
         
         var session = await FindSessionAsync(sessions, id, cancellationToken);
         if (session != null)
@@ -68,7 +68,7 @@ internal sealed class WindowsAudioAgent : IAudioAgent, IDisposable
 
     public async Task ToggleMuteAsync(string id, bool mute, CancellationToken cancellationToken)
     {
-        using var sessions = new AudioSessionsEnumerator();
+        using var sessions = new AudioSessionsCollection();
         
         var session = await FindSessionAsync(sessions, id, cancellationToken);
         if (session != null)
@@ -84,11 +84,11 @@ internal sealed class WindowsAudioAgent : IAudioAgent, IDisposable
     {
         while (!_cts.IsCancellationRequested)
         {
-            await Task.Delay(TimeSpan.FromMinutes(10),  _cts.Token);
+            await Task.Delay(TimeSpan.FromMinutes(10), _cts.Token);
 
             try
             {
-                using var sessions = new AudioSessionsEnumerator();
+                using var sessions = new AudioSessionsCollection();
                 await _idMapper.PruneAsync(sessions.Select(x => x.GetSessionInstanceIdentifier), _cts.Token);
             }
             catch (Exception) when (!_cts.IsCancellationRequested)
@@ -98,7 +98,7 @@ internal sealed class WindowsAudioAgent : IAudioAgent, IDisposable
         }
     }
     
-    private async Task<AudioSessionControl?> FindSessionAsync(AudioSessionsEnumerator sessions, string mapId, CancellationToken cancellationToken)
+    private async Task<AudioSessionControl?> FindSessionAsync(AudioSessionsCollection sessions, string mapId, CancellationToken cancellationToken)
     {
         var sessionId = await _idMapper.FindSessionIdAsync(mapId, cancellationToken);
         if (sessionId == null)

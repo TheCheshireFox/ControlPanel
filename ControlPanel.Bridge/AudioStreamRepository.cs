@@ -79,7 +79,7 @@ public class AudioStreamRepository : IAudioStreamRepository
     public async Task UpdateAsync(string agentId, BridgeAudioStream[] streams, CancellationToken cancellationToken)
     {
         var diff = new List<AudioStreamDiff>();
-        var removed =  new List<AudioStreamInfo>();
+        var removed = new List<AudioStreamInfo>();
         
         await _streamsLock.WaitAsync(cancellationToken);
         try

@@ -14,7 +14,7 @@ public interface IAgentConnection
 public sealed class AgentConnection : IAgentConnection, IDisposable
 {
     private readonly ILogger<AgentConnection> _logger;
-    private readonly ITextWebSocketClient _ws;
+    private readonly IWebSocket _ws;
     private readonly IAudioStreamRepository _audioStreamRepository;
     private readonly IAudioStreamIconCache _audioStreamIconCache;
     private readonly IControllerConnection _controllerConnection;
@@ -24,7 +24,7 @@ public sealed class AgentConnection : IAgentConnection, IDisposable
     public string AgentId { get; }
     
     public AgentConnection(string agentId,
-        ITextWebSocketClient ws,
+        IWebSocket ws,
         IAudioStreamRepository audioStreamRepository,
         IAudioStreamIconCache audioStreamIconCache,
         IControllerConnection controllerConnection,
@@ -48,7 +48,7 @@ public sealed class AgentConnection : IAgentConnection, IDisposable
 
     public Task SendAsync(BridgeMessage message, CancellationToken cancellationToken)
     {
-        return _ws.SendAsync(JsonSerializer.Serialize((dynamic)message), cancellationToken);
+        return _ws.SendAsync((string)JsonSerializer.Serialize((dynamic)message), cancellationToken);
     }
     
     private async Task HandleAgentMessageAsync(string json, CancellationToken cancellationToken)

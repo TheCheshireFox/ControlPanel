@@ -3,7 +3,6 @@ using System.Text;
 using ControlPanel.Agent.Linux;
 using ControlPanel.Agent.Options;
 using ControlPanel.Agent.Shared;
-using ControlPanel.Agent.WebSocket;
 using ControlPanel.Agent.Windows;
 using ControlPanel.Shared;
 using ControlPanel.Shared.Logging;
@@ -35,8 +34,6 @@ public class Program
         });
 
         builder.Services.AddSingleton<IWebSocketFactory, WebSocketFactory>();
-        builder.Services.AddSingleton<ITextWebSocketClientFactory, TextWebSocketClientFactory>();
-        builder.Services.AddSingleton<TextWebSocketClient>();
         builder.Services.AddHostedService<AgentService>();
         
         var agentHost = CreateAudioAgentHost();
