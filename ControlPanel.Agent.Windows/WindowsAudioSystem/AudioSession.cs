@@ -33,9 +33,13 @@ public sealed class AudioSession : IDisposable
 
     public event EventHandler<AudioSession>? OnSessionDisconnected;
     
-    public AudioSession(IAudioSessionControl control)
+    public AudioSession(IAudioSessionControl control) : this(new AudioSessionControl(control))
     {
-        _control = new AudioSessionControl(control);
+    }
+    
+    public AudioSession(AudioSessionControl control)
+    {
+        _control = control;
         _audioSessionEventsHandler = new AudioSessionEventsHandler(this);
         _control.RegisterEventClient(_audioSessionEventsHandler);
         

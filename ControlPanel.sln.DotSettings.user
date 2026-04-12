@@ -252,6 +252,6 @@
     &lt;TestId&gt;NUnit3x::742EAEB7-4D30-4DA1-8AC6-1E289D432613::net9.0::ControlPanel.Bridge.UnitTests.AudioStreamRepositoryTests.UpdateAsync_GetRgb565A8IconAsync_HasIconsForEachStream&lt;/TestId&gt;
   &lt;/TestAncestor&gt;
 &lt;/SessionState&gt;</s:String>
-	<s:Boolean x:Key="/Default/UnloadedProject/UnloadedProjects/=742eaeb7_002D4d30_002D4da1_002D8ac6_002D1e289d432613_0023ControlPanel_002EBridge_002EUnitTests/@EntryIndexedValue">True</s:Boolean>
+	
 	
 	<s:Boolean x:Key="/Default/UserDictionary/Words/=Lvgl/@EntryIndexedValue">True</s:Boolean></wpf:ResourceDictionary>

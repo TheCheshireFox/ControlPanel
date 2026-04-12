@@ -16,10 +16,30 @@ public sealed class AudioSessionProvider : IDisposable, IAudioSessionProvider
     
     public AudioSessionProvider()
     {
+        InitializeSessions();
+
         _notificationClient = new MMNotificationClient(this);
         _deviceEnumerator.RegisterEndpointNotificationCallback(_notificationClient);
     }
 
+    private void InitializeSessions()
+    {
+        foreach (var role in (Role[])[Role.Multimedia, Role.Console])
+        {
+            var device = _deviceEnumerator.GetDefaultAudioEndpoint(DataFlow.Render, role);
+            device.AudioSessionManager.OnSessionCreated += OnSessionCreated;
+            _devices.TryAdd(device.ID, device);
+
+            for (var i = 0; i < device.AudioSessionManager.Sessions.Count; i++)
+            {
+                var sessionControl = device.AudioSessionManager.Sessions[i];
+                var session = new AudioSession(sessionControl);
+                session.OnSessionDisconnected += OnSessionDisconnected;
+                _sessions.TryAdd(session.Id, session);
+            }
+        }
+    }
+    
     private void OnDeviceAdded(string pwstrDeviceId)
     {
         _devices.GetOrAdd(pwstrDeviceId, id =>
