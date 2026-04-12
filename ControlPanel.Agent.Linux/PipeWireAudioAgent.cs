@@ -115,9 +115,8 @@ internal class PipeWireAudioAgent : IAudioAgent
             return true;
         if (!string.IsNullOrWhiteSpace(nodeDesc) && mediaName == nodeDesc)
             return true;
-        
-        return mediaName is "Audio Stream" or "audio stream" or "Playback Stream"
-               || mediaName.StartsWith("audio") && (nodeName?.StartsWith("qemu") ?? false);
+
+        return mediaName is "Audio Stream" or "audio stream" or "Playback Stream";
     }
 
     private static string GetBinaryName(Dictionary<string, JsonValue> props)

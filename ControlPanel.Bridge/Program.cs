@@ -88,6 +88,7 @@ public class Program
         
         builder.Services.AddSystemd();
 
+        builder.Services.Configure<StreamsOptions>(builder.Configuration.GetSection("Streams"));
         builder.Services.Configure<TransportOptions>(builder.Configuration.GetSection("Transport"));
         builder.Services.Configure<BtRfcommOptions>(builder.Configuration.GetSection("BtRfcomm"));
         builder.Services.Configure<UartOptions>(builder.Configuration.GetSection("Uart"));

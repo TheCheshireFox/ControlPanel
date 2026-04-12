@@ -1,7 +1,10 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
+using ControlPanel.Bridge.Options;
 using ControlPanel.Bridge.Protocol;
 using ControlPanel.Protocol;
 using ControlPanel.WebSocket;
+using Microsoft.Extensions.Options;
 using StreamsMessage = ControlPanel.Protocol.StreamsMessage;
 
 namespace ControlPanel.Bridge.Agent;
@@ -19,6 +22,7 @@ public sealed class AgentConnection : IAgentConnection, IDisposable
     private readonly IAudioStreamRepository _audioStreamRepository;
     private readonly IAudioStreamIconCache _audioStreamIconCache;
     private readonly IControllerConnection _controllerConnection;
+    private readonly Regex[] _exclude;
 
     private readonly AgentAppIconProvider _agentAppIconProvider = new(32, 10);
     
@@ -29,6 +33,7 @@ public sealed class AgentConnection : IAgentConnection, IDisposable
         IAudioStreamRepository audioStreamRepository,
         IAudioStreamIconCache audioStreamIconCache,
         IControllerConnection controllerConnection,
+        IOptions<StreamsOptions> streamsOptions,
         ILogger<AgentConnection> logger)
     {
         AgentId = agentId;
@@ -37,7 +42,7 @@ public sealed class AgentConnection : IAgentConnection, IDisposable
         _audioStreamIconCache = audioStreamIconCache;
         _controllerConnection = controllerConnection;
         _logger = logger;
-
+        _exclude = CompileRegexes(streamsOptions.Value.Exclude).ToArray();
         _audioStreamRepository.OnSnapshotChangedAsync += SnapshotChangedAsync;
     }
     
@@ -71,19 +76,20 @@ public sealed class AgentConnection : IAgentConnection, IDisposable
             {
                 case BridgeMessageType.AgentInit:
                 {
-                    var msg = doc.Deserialize<AgentInitMessage>() ?? throw new JsonException($"Unable to parse {nameof(MessageType.Streams)} message");
+                    var msg = doc.Deserialize<AgentInitMessage>() ?? throw new JsonException($"Unable to parse {type} message");
                     _agentAppIconProvider.SetAgentIcon(msg.AgentIcon);
                     break;
                 }
                 case BridgeMessageType.Streams:
                 {
-                    var msg = doc.Deserialize<StreamsMessage>() ?? throw new JsonException($"Unable to parse {nameof(MessageType.Streams)} message");
-                    await _audioStreamRepository.UpdateAsync(AgentId, msg.Streams, cancellationToken);
+                    var msg = doc.Deserialize<StreamsMessage>() ?? throw new JsonException($"Unable to parse {type} message");
+                    var streams = FilterStreams(msg.Streams);
+                    await _audioStreamRepository.UpdateAsync(AgentId, streams, cancellationToken);
                     break;
                 }
                 case BridgeMessageType.Icon:
                 {
-                    var msg = doc.Deserialize<AudioStreamIconMessage>() ?? throw new JsonException($"Unable to parse {nameof(MessageType.Streams)} message");
+                    var msg = doc.Deserialize<AudioStreamIconMessage>() ?? throw new JsonException($"Unable to parse {type} message");
                     var (size, icon) = ToUartIcon(msg);
                     await _controllerConnection.SendMessageAsync(new IconMessage(msg.Source, AgentId, size, icon), cancellationToken);
                     break;
@@ -110,6 +116,11 @@ public sealed class AgentConnection : IAgentConnection, IDisposable
         return (_agentAppIconProvider.IconSize, icon);
     }
 
+    private IEnumerable<BridgeAudioStream> FilterStreams(IEnumerable<BridgeAudioStream> streams)
+    {
+        return streams.Where(x => !_exclude.Any(r => r.IsMatch(x.Name)));
+    }
+    
     private Task SnapshotChangedAsync(AudioStreamIncrementalSnapshot snapshot, CancellationToken cancellationToken)
     {
         var deletedSources = snapshot.Deleted
@@ -122,7 +133,26 @@ public sealed class AgentConnection : IAgentConnection, IDisposable
         
         return Task.CompletedTask;
     }
-    
+
+    private IEnumerable<Regex> CompileRegexes(IEnumerable<string> patters)
+    {
+        List<Regex> regexes = [];
+        
+        foreach (var pattern in patters)
+        {
+            try
+            {
+                regexes.Add(new Regex(pattern, RegexOptions.Compiled));
+            }
+            catch (Exception exc)
+            {
+                _logger.LogError(exc, "Failed to parse regex: {Message}", exc.Message);
+            }
+        }
+
+        return regexes;
+    }
+
     public void Dispose()
     {
         _audioStreamRepository.OnSnapshotChangedAsync -= SnapshotChangedAsync;

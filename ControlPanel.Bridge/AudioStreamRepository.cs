@@ -54,7 +54,7 @@ public interface IAudioStreamRepository
 {
     event Func<AudioStreamIncrementalSnapshot, CancellationToken, Task> OnSnapshotChangedAsync;
     
-    Task UpdateAsync(string agentId, BridgeAudioStream[] streams, CancellationToken cancellationToken);
+    Task UpdateAsync(string agentId, IEnumerable<BridgeAudioStream> streams, CancellationToken cancellationToken);
     Task ClearAsync(string agentId, CancellationToken cancellationToken);
     Task<AudioStreamInfo[]> GetAllAsync(CancellationToken cancellationToken);
 }
@@ -76,7 +76,7 @@ public class AudioStreamRepository : IAudioStreamRepository
 
     public event Func<AudioStreamIncrementalSnapshot, CancellationToken, Task>? OnSnapshotChangedAsync;
 
-    public async Task UpdateAsync(string agentId, BridgeAudioStream[] streams, CancellationToken cancellationToken)
+    public async Task UpdateAsync(string agentId, IEnumerable<BridgeAudioStream> streams, CancellationToken cancellationToken)
     {
         var diff = new List<AudioStreamDiff>();
         var removed = new List<AudioStreamInfo>();
