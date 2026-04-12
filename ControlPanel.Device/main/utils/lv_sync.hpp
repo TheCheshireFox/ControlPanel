@@ -1,6 +1,6 @@
+// ReSharper disable CppMemberFunctionMayBeStatic
 #pragma once
 
-#include "esp_log.h"
 #include <mutex>
 
 struct lv_lock_t {

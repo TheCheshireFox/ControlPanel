@@ -1,7 +1,5 @@
 #pragma once
 
-#include <vector>
-
 #include "lvgl.h"
 
 consteval lv_color_t color_hex(uint32_t c)
@@ -15,11 +13,11 @@ consteval lv_color_t color_hex(uint32_t c)
 
 struct app_style
 {
-    inline static constexpr lv_color_t primary_fg = color_hex(0xFF8800);
-    inline static constexpr lv_color_t primary_bg = color_hex(0x000000);
+    static constexpr auto primary_fg = color_hex(0xFF8800);
+    static constexpr auto primary_bg = color_hex(0x000000);
     
 private:
-    inline static lv_style_t* init_content_style()
+    static lv_style_t* init_content_style()
     {
         static lv_style_t s;
         lv_style_init(&s);
@@ -28,7 +26,7 @@ private:
         return &s;
     }
 
-    inline static lv_style_t* init_title_style()
+    static lv_style_t* init_title_style()
     {
         static lv_style_t s;
         lv_style_init(&s);
@@ -41,7 +39,7 @@ private:
         return &s;
     }
 
-    inline static lv_style_t* init_slider_style()
+    static lv_style_t* init_slider_style()
     {
         static lv_style_t s;
         lv_style_init(&s);
@@ -50,7 +48,7 @@ private:
         return &s;
     }
 
-    inline static lv_style_t* init_slider_label()
+    static lv_style_t* init_slider_label()
     {
         static lv_style_t s;
         lv_style_init(&s);
@@ -60,7 +58,7 @@ private:
         return &s;
     }
 
-    inline static lv_style_t* init_list_style()
+    static lv_style_t* init_list_style()
     {
         static lv_style_t s;
         lv_style_init(&s);
@@ -71,7 +69,7 @@ private:
         return &s;
     }
 
-    inline static lv_style_t* init_list_item_style()
+    static lv_style_t* init_list_item_style()
     {
         static lv_style_t s;
         lv_style_init(&s);
@@ -83,7 +81,7 @@ private:
         return &s;
     }
 
-    inline static lv_style_t* init_app_icon_img()
+    static lv_style_t* init_app_icon_img()
     {
         static lv_style_t s;
         lv_style_init(&s);
@@ -91,7 +89,7 @@ private:
         return &s;
     }
 
-    inline static lv_style_t* init_mute_click_area()
+    static lv_style_t* init_mute_click_area()
     {
         static lv_style_t s;
         lv_style_init(&s);
@@ -99,7 +97,7 @@ private:
         return &s;
     }
 
-    inline static void without_borders(lv_style_t* s)
+    static void without_borders(lv_style_t* s)
     {
         lv_style_set_pad_all(s, 0);
         lv_style_set_margin_all(s, 0);

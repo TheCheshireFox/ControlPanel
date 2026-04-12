@@ -36,7 +36,7 @@ static void lvgl_init_logging() {
             .level = level
         };
         
-        auto sz = std::min((size_t)(sizeof(rec.buf) - 1), strlen(buf));
+        auto sz = std::min(sizeof(rec.buf) - 1, strlen(buf));
         memcpy(rec.buf, buf, sz);
         rec.buf[sz] = 0;
         

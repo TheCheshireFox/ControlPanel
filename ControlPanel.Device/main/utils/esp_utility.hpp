@@ -6,10 +6,10 @@
 #include "esp_log.h"
 #include "esp_err.h"
 
-#define THIS_CALLBACK(that, fn) +[](void* a) {\
+#define THIS_CALLBACK(that, fn) (+[](void* a) {\
     if (!a) { ESP_LOGE("CALLBACK", "%s", "'this' is null"); configASSERT(a); }\
     ((decltype(that))a)->fn();\
-}
+})
 
 template<typename F>
 struct scoped_fn
@@ -20,11 +20,11 @@ private:
     F _fn;
 };
 
-using esp_timer_ptr = std::unique_ptr<esp_timer_handle_t, void(*)(esp_timer_handle_t*)>;
+using esp_timer_ptr = std::unique_ptr<esp_timer_handle_t, void(*)(const esp_timer_handle_t*)>;
 
-esp_timer_ptr make_esp_timer(const esp_timer_create_args_t& args)
+inline esp_timer_ptr make_esp_timer(const esp_timer_create_args_t& args)
 {
-    static auto deleter = +[](esp_timer_handle_t* timer)
+    static auto deleter = +[](const esp_timer_handle_t* timer)
     {
         if (timer == nullptr) return;
         if (*timer != nullptr)

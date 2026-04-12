@@ -4,9 +4,9 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using SixLabors.Fonts;
 using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Drawing.Processing;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
-using SixLabors.ImageSharp.Drawing.Processing;
 
 namespace ControlPanel.Bridge;
 
@@ -14,6 +14,7 @@ public sealed record TextSprite(int Width, int Height, byte[] Image);
 
 public interface ITextRenderer
 {
+    void SetParameters(float dpi, int fontSize, int maxWidth);
     TextSprite Render(string text);
 }
 
@@ -21,9 +22,9 @@ public class TextRenderer : ITextRenderer
 {
     private const float Pad = 1f; // padding because during rasterization font can go slightly out of bounds (pixel snapping, hinting)
     
-    private readonly float _dpi;
-    private readonly int _maxWidth;
-    private readonly Font _font;
+    private float _dpi;
+    private int _maxWidth;
+    private Font _font;
     private readonly IMemoryCache _spriteCache;
     private readonly MemoryCacheEntryOptions _entryOptions;
 
@@ -42,7 +43,14 @@ public class TextRenderer : ITextRenderer
 
         _entryOptions = new MemoryCacheEntryOptions { SlidingExpiration = options.Value.CacheExpiry };
     }
-    
+
+    public void SetParameters(float dpi, int fontSize, int maxWidth)
+    {
+        _dpi = dpi;
+        _maxWidth = maxWidth;
+        _font = _font.Family.CreateFont(fontSize);
+    }
+
     public TextSprite Render(string text)
     {
         return _spriteCache.GetOrCreate(text, CreateTextSprite, _entryOptions)!;

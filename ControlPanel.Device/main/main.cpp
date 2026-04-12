@@ -37,7 +37,7 @@ static constexpr char TAG[] = "main";
 
 // ST7789T3
 #define LCD_SPI_HOST   SPI3_HOST
-#define LCD_SPI_CLOCK  60 * 1000000
+#define LCD_SPI_CLOCK  (60 * 1000000)
 #define PIN_LCD_MOSI   GPIO_NUM_23
 #define PIN_LCD_SCLK   GPIO_NUM_18
 #define PIN_LCD_CS     GPIO_NUM_5
@@ -174,7 +174,6 @@ void host_connection_init(std::optional<TFrameTransport>& ft)
     if constexpr (std::is_same_v<TFrameTransport, transport::uart_transport_t>)
     {
         ft.emplace(UART_PORT, UART_TX, UART_RX, UART_BUF_SIZE, UART_BAUDRATE);
-        uart_log_proto_forwarder::init(host_connection.value());
     }
     else if constexpr (std::is_same_v<TFrameTransport, transport::bt_uart_transport_t>)
     {
@@ -190,6 +189,11 @@ void host_connection_init(std::optional<TFrameTransport>& ft)
     host_connection.emplace(*ft);
     host_connection->init();
 
+    if constexpr (std::is_same_v<TFrameTransport, transport::uart_transport_t>)
+    {
+        uart_log_proto_forwarder::init(host_connection.value());
+    }
+
     ESP_LOGI(TAG, "Frame processor initialized");
 }
 
@@ -200,7 +204,7 @@ void host_connection_register_handler()
         backlight_timer->kick();
 
         auto bmsg = parse_bridge_message(data);
-        if (streams_message_t* msg = std::get_if<streams_message_t>(&bmsg))
+        if (auto* msg = std::get_if<streams_message_t>(&bmsg))
         {
             ESP_LOGD(TAG, "refresh updated=%d deleted=%d", msg->updated.size(), msg->deleted.size());
 
@@ -210,7 +214,7 @@ void host_connection_register_handler()
                 : BL_TIMER_SHORT;
             backlight_timer->set_timeout(ms);
         }
-        else if (icon_message_t* msg = std::get_if<icon_message_t>(&bmsg))
+        else if (auto* msg = std::get_if<icon_message_t>(&bmsg))
         {
             ESP_LOGD(TAG, "icon source=%s agent_id=%s sz=%d", msg->source.c_str(), msg->agent_id.c_str(), msg->icon.size());
             volume_display->update_icon(msg->source, msg->agent_id, msg->size, msg->size, msg->icon);

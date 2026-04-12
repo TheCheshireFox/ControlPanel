@@ -4,7 +4,6 @@
 #include <condition_variable>
 
 #include "esp_log.h"
-#include "esp_check.h"
 #include "esp_bt.h"
 #include "esp_bt_main.h"
 #include "esp_gap_bt_api.h"
@@ -52,14 +51,14 @@ namespace transport
             ESP_ERROR_CHECK(esp_spp_enhanced_init(&bt_spp_cfg));
 
             esp_bt_io_cap_t cap = ESP_BT_IO_CAP_NONE;
-            esp_bt_gap_set_security_param(esp_bt_sp_param_t::ESP_BT_SP_IOCAP_MODE, &cap, sizeof(cap));
+            esp_bt_gap_set_security_param(ESP_BT_SP_IOCAP_MODE, &cap, sizeof(cap));
         }
 
-        void write(std::span<uint8_t> data)
+        static void write(std::span<uint8_t> data)
         {
             std::unique_lock lock{_write_sync};
 
-            ESP_LOGI(TAG, "preparing to write sz=%d cong=%d handle=%d", data.size(), (int)_cong, _handle);
+            ESP_LOGI(TAG, "preparing to write sz=%d cong=%d handle=%d", data.size(), static_cast<int>(_cong), _handle);
 
             _cong_cv.wait(lock, +[](){ return !_cong && _handle; });
 
@@ -69,7 +68,7 @@ namespace transport
         template<typename F>
         void on_receive(F&& f)
         {
-            _on_recieve = std::move(f);
+            _on_receive = std::forward<F>(f);
         }
 
     private:
@@ -96,7 +95,7 @@ namespace transport
                     esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
                     break;
                 case ESP_SPP_DATA_IND_EVT:
-                    if (_on_recieve) _on_recieve(std::span<uint8_t>(param->data_ind.data, param->data_ind.len));
+                    if (_on_receive) _on_receive(std::span(param->data_ind.data, param->data_ind.len));
                     break;
                 case ESP_SPP_WRITE_EVT:
                 {
@@ -109,7 +108,7 @@ namespace transport
                 }
                 case ESP_SPP_SRV_OPEN_EVT:                    
                 {
-                    ESP_LOGI(TAG, "ESP_SPP_SRV_OPEN_EVT status:%d handle:%"PRIu32", rem_bda:[%s]", param->srv_open.status, param->srv_open.handle, bda2str(param->srv_open.rem_bda));
+                    ESP_LOGI(TAG, "ESP_SPP_SRV_OPEN_EVT status:%d handle:%" PRIu32 ", rem_bda:[%s]", param->srv_open.status, param->srv_open.handle, bda2str(param->srv_open.rem_bda));
 
                     std::unique_lock lock{_write_sync};
                     _handle = param->srv_open.handle;
@@ -131,7 +130,7 @@ namespace transport
             }
         }
 
-        void esp_bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
+        static void esp_bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
         {
             switch (event)
             {
@@ -153,7 +152,6 @@ namespace transport
                     ESP_LOGI(TAG, "gap event: %d", event);
                     break;
             }
-            return;
         }
 
         static const char* bda2str(uint8_t* bda)
@@ -176,6 +174,6 @@ namespace transport
 
         const std::string _server_name;
         const std::string _dev_name;
-        std::function<void(std::span<uint8_t>)> _on_recieve{};
+        std::function<void(std::span<uint8_t>)> _on_receive{};
     };
 };

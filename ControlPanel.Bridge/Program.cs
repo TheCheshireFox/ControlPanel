@@ -102,7 +102,7 @@ public class Program
         builder.Services.AddSingleton<IControllerConnection, ControllerConnection>();
         builder.Services.AddSingleton<ITextRenderer, TextRenderer>();
         builder.Services.AddSingleton<IAudioStreamIconCache, AudioStreamIconCache>();
-        builder.Services.AddSingleton<IFrameTransport, UartFrameTransport>();
+        builder.Services.AddSingleton<IFrameTransport, FrameTransport>();
         builder.Services.AddSingleton<IFrameProtocol, FrameProtocol>();
 
         AddTransportStreamProvider(builder);

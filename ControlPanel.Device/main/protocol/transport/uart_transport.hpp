@@ -40,7 +40,7 @@ namespace transport
         template<typename F>
         void on_receive(F&& f)
         {
-            _on_recieve = std::move(f);
+            _on_receive = std::forward<F>(f);
         }
 
     private:
@@ -63,7 +63,7 @@ namespace transport
                         if (read <= 0)
                             break;
 
-                        if (_on_recieve) _on_recieve(std::span<uint8_t>(buffer.data(), read));
+                        if (_on_receive) _on_receive(std::span(buffer.data(), read));
                     }
                     break;
                 }
@@ -89,6 +89,6 @@ namespace transport
     private:
         uart_port_t _port;
         QueueHandle_t _uart_rx_queue;
-        std::function<void(std::span<uint8_t>)> _on_recieve{};
+        std::function<void(std::span<uint8_t>)> _on_receive{};
     };
 };

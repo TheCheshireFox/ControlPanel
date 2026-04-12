@@ -1,6 +1,6 @@
 namespace ControlPanel.Bridge.Protocol;
 
-public enum UartMessageType
+public enum MessageType
 {
     Streams,
     SetVolume,
@@ -8,5 +8,6 @@ public enum UartMessageType
     Icon,
     GetIcon,
     RequestRefresh,
-    Log
+    Log,
+    TextRendererParameters
 }

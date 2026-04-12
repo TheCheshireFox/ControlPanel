@@ -10,13 +10,13 @@ namespace waveshare_st7789
         const auto hor_res = driver->width();
         const auto ver_res = driver->height();
 
-        auto disp = lv_display_create(hor_res, ver_res);
+        auto disp = lv_display_create(static_cast<int32_t>(hor_res), static_cast<int32_t>(ver_res));
         lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565);
         lv_display_set_user_data(disp, driver);
 
         lv_display_set_flush_cb(disp, +[](lv_display_t* display, const lv_area_t *area, unsigned char *px_map)
         {
-            auto driver = (waveshare_st7789_t*)lv_display_get_user_data(display);
+            auto driver = static_cast<waveshare_st7789_t*>(lv_display_get_user_data(display));
 
             lv_draw_sw_rgb565_swap(px_map, lv_area_get_size(area));
 

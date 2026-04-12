@@ -6,14 +6,12 @@ namespace ControlPanel.Bridge;
 
 public interface IControllerConnection
 {
-    IAsyncEnumerable<UartMessage> ReadMessagesAsync(CancellationToken cancellationToken);
-    Task SendMessageAsync<T>(T message, CancellationToken cancellationToken) where T : UartMessage;
+    IAsyncEnumerable<Message> ReadMessagesAsync(CancellationToken cancellationToken);
+    Task SendMessageAsync<T>(T message, CancellationToken cancellationToken) where T : Message;
 }
 
 public class ControllerConnection : IControllerConnection
 {
-    private static readonly UartMessageSerializer _serializer = new();
-
     private readonly TimeSpan _timeout = TimeSpan.FromSeconds(5);
     private readonly int _retryCount = 3;
     
@@ -26,14 +24,14 @@ public class ControllerConnection : IControllerConnection
         _logger = logger;
     }
 
-    public async IAsyncEnumerable<UartMessage> ReadMessagesAsync([EnumeratorCancellation] CancellationToken cancellationToken)
+    public async IAsyncEnumerable<Message> ReadMessagesAsync([EnumeratorCancellation] CancellationToken cancellationToken)
     {
         await foreach (var data in _protocol.ReadAsync(cancellationToken))
         {
-            UartMessage? message = null;
+            Message? message = null;
             try
             {
-                message = _serializer.Deserialize(data);
+                message = MessageSerializer.Deserialize(data);
             }
             catch (OperationCanceledException)
             {
@@ -49,8 +47,8 @@ public class ControllerConnection : IControllerConnection
         }
     }
 
-    public async Task SendMessageAsync<T>(T message, CancellationToken cancellationToken) where T : UartMessage
+    public async Task SendMessageAsync<T>(T message, CancellationToken cancellationToken) where T : Message
     {
-        await _protocol.SendAsync(_serializer.Serialize(message), _timeout, _retryCount, cancellationToken);
+        await _protocol.SendAsync(MessageSerializer.Serialize(message), _timeout, _retryCount, cancellationToken);
     }
 }

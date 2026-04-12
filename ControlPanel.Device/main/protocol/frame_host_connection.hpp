@@ -34,7 +34,7 @@ namespace transport
             _transport.on_receive([&](auto d){ on_data(d); });
         }
 
-        void init(void)
+        void init()
         {
             _send_queue = xQueueCreate(SEND_QUEUE_SIZE, sizeof(frame_info_t));
             configASSERT(_send_queue);
@@ -45,7 +45,7 @@ namespace transport
         template<typename F>
         void register_data_handler(F&& cb)
         {
-            _data_handler = std::move(cb);
+            _data_handler = std::forward<F>(cb);
         }
 
         void send(std::span<uint8_t> data, uint32_t retry_interval_ms = 1000, uint32_t retry_count = 3)
@@ -103,7 +103,6 @@ namespace transport
 
         void send_task()
         {
-            std::array<uint8_t, MAX_TX_FRAME> buffer;
             frame_info_t frame_info;
             while (true)
             {
@@ -111,14 +110,17 @@ namespace transport
                     continue;
                 
                 frame_t frame{frame_info.seq, frame_info.type, std::span<uint8_t>(frame_info.data, frame_info.size)};
+
+                std::array<uint8_t, MAX_TX_FRAME> buffer;
                 auto frame_bytes = to_bytes(buffer, frame);
 
-                for (int i = 0; i < frame_info.r_count; i++)
+                for (auto i = 0; i < frame_info.r_count; i++)
                 {
                     send_bytes(frame_bytes);
 
                     std::unique_lock lock{_ack_sync};
-                    auto success = _new_ack.wait_for(lock, std::chrono::milliseconds(frame_info.r_interval), [&]() {
+                    auto success = _new_ack.wait_for(lock, std::chrono::milliseconds(frame_info.r_interval), [&]
+                    {
                         return _last_ack == frame.seq;
                     });
 

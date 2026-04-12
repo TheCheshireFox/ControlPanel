@@ -3,7 +3,7 @@ using MessagePack;
 namespace ControlPanel.Bridge.Protocol;
 
 [MessagePackObject(true)]
-public record UartSetVolumeMessage(
-    [property: Key("id")] UartAudioStreamId Id, 
+public record SetVolumeMessage(
+    [property: Key("id")] AudioStreamId Id, 
     [property: Key("volume")] double Volume)
-    : UartMessage(UartMessageType.SetVolume);
+    : Message(MessageType.SetVolume);

@@ -1,4 +1,5 @@
 using ControlPanel.Agent.Shared;
+using ControlPanel.Agent.Windows.WindowsAudioSystem;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Configuration;
@@ -30,6 +31,7 @@ public class WindowsAudioAgentHost : IAudioAgentHost
 {
     public void Configure(string[] args, IHostApplicationBuilder builder)
     {
+        builder.Services.AddSingleton<IAudioSessionProvider, AudioSessionProvider>();
         builder.Services.AddSingleton<IIconLocator, IconLocator>();
         builder.Services.AddSingleton<IAudioAgent, WindowsAudioAgent>();
         

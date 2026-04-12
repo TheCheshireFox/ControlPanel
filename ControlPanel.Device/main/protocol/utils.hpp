@@ -11,7 +11,7 @@ namespace transport
         if (span.size() < seq.size())
             return -1;
 
-        for (std::size_t i = 0; i <= span.size() - seq.size(); i++)
+        for (auto i = 0; i <= span.size() - seq.size(); i++)
         {
             if (span[i] != seq[0])
                 continue;

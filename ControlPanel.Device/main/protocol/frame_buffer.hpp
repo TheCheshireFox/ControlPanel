@@ -52,7 +52,7 @@ namespace transport
             return _w_pos - _r_pos;
         }
 
-        constexpr std::size_t capacity() const
+        static constexpr std::size_t capacity()
         {
             return Size;
         }

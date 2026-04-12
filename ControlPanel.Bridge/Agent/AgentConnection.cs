@@ -2,6 +2,7 @@ using System.Text.Json;
 using ControlPanel.Bridge.Protocol;
 using ControlPanel.Protocol;
 using ControlPanel.WebSocket;
+using StreamsMessage = ControlPanel.Protocol.StreamsMessage;
 
 namespace ControlPanel.Bridge.Agent;
 
@@ -70,21 +71,21 @@ public sealed class AgentConnection : IAgentConnection, IDisposable
             {
                 case BridgeMessageType.AgentInit:
                 {
-                    var msg = doc.Deserialize<AgentInitMessage>() ?? throw new JsonException($"Unable to parse {nameof(UartMessageType.Streams)} message");
+                    var msg = doc.Deserialize<AgentInitMessage>() ?? throw new JsonException($"Unable to parse {nameof(MessageType.Streams)} message");
                     _agentAppIconProvider.SetAgentIcon(msg.AgentIcon);
                     break;
                 }
                 case BridgeMessageType.Streams:
                 {
-                    var msg = doc.Deserialize<StreamsMessage>() ?? throw new JsonException($"Unable to parse {nameof(UartMessageType.Streams)} message");
+                    var msg = doc.Deserialize<StreamsMessage>() ?? throw new JsonException($"Unable to parse {nameof(MessageType.Streams)} message");
                     await _audioStreamRepository.UpdateAsync(AgentId, msg.Streams, cancellationToken);
                     break;
                 }
                 case BridgeMessageType.Icon:
                 {
-                    var msg = doc.Deserialize<AudioStreamIconMessage>() ?? throw new JsonException($"Unable to parse {nameof(UartMessageType.Streams)} message");
+                    var msg = doc.Deserialize<AudioStreamIconMessage>() ?? throw new JsonException($"Unable to parse {nameof(MessageType.Streams)} message");
                     var (size, icon) = ToUartIcon(msg);
-                    await _controllerConnection.SendMessageAsync(new UartIconMessage(msg.Source, AgentId, size, icon), cancellationToken);
+                    await _controllerConnection.SendMessageAsync(new IconMessage(msg.Source, AgentId, size, icon), cancellationToken);
                     break;
                 }
                 default:

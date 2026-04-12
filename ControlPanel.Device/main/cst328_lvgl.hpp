@@ -19,7 +19,7 @@ namespace cts328
 
     static lv_indev_t* lvgl_create_indev(cst328_driver_t* driver, bool invert_x = false, bool invert_y = false, bool swap_xy = false, uint32_t touch_timeout = 40)
     {
-        auto touch_data = (details::cts328_lvgl_touch_data_t*)lv_malloc(sizeof(details::cts328_lvgl_touch_data_t));
+        auto touch_data = static_cast<details::cts328_lvgl_touch_data_t*>(lv_malloc(sizeof(details::cts328_lvgl_touch_data_t)));
         touch_data->driver = driver;
         touch_data->invert_x = invert_x;
         touch_data->invert_y = invert_y;
@@ -32,7 +32,7 @@ namespace cts328
         
         lv_indev_set_read_cb(touch_indev, +[](lv_indev_t* indev, lv_indev_data_t *data)
         {
-            auto touch_data = (details::cts328_lvgl_touch_data_t*)lv_indev_get_user_data(indev);
+            auto touch_data = static_cast<details::cts328_lvgl_touch_data_t*>(lv_indev_get_user_data(indev));
 
             if (!touch_data || !touch_data->driver) {
                 data->state = LV_INDEV_STATE_RELEASED;
@@ -40,7 +40,7 @@ namespace cts328
             }
 
             auto pt = touch_data->driver->get_touch();
-            auto touched = ((esp_timer_get_time() / 1000) - pt.last_touch_ms) < touch_data->touch_timeout;
+            auto touched = esp_timer_get_time() / 1000 - pt.last_touch_ms < touch_data->touch_timeout;
 
             data->state = touched ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
 

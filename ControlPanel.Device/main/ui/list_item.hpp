@@ -1,20 +1,17 @@
 #pragma once
 
 #include <string>
-#include <memory>
 #include <functional>
 
 #include "ui/style.hpp"
 
 #include "lvgl.h"
 
-#include "utils/esp_utility.hpp"
-
 class list_item_t
 {
 public:
     list_item_t(lv_obj_t* parent)
-        : _mute(false), _slider_editing(false), _on_volume_changed(), _on_mute_changed()
+        : _mute(false), _slider_editing(false)
     {
         std::unique_lock lock{lv_sync};
 
@@ -43,8 +40,8 @@ public:
         
         lv_obj_add_event_cb(_slider, +[](lv_event_t* e)
         {
-            auto slider = (lv_obj_t*)lv_event_get_target(e);
-            auto label = (lv_obj_t*)lv_event_get_user_data(e);
+            auto slider = static_cast<lv_obj_t*>(lv_event_get_target(e));
+            auto label = static_cast<lv_obj_t*>(lv_event_get_user_data(e));
             update_slider_label(slider, label);
         }, LV_EVENT_VALUE_CHANGED, _slider_label);
 
@@ -82,7 +79,7 @@ public:
         }
     }
 
-    void set_volume(int32_t value)
+    void set_volume(int8_t value)
     {
         std::scoped_lock lock{lv_sync};
         
@@ -93,7 +90,7 @@ public:
         lv_label_set_text(_slider_label, std::to_string(value).c_str());
     }
 
-    void on_volume_changed(const std::function<void(int32_t)>& cb)
+    void on_volume_changed(const std::function<void(int8_t)>& cb)
     {
         _on_volume_changed = cb;
     }
@@ -112,8 +109,8 @@ private:
 
     void set_grid_layout(lv_obj_t* list_item)
     {
-        static const int32_t cols[] = { 10, LV_GRID_CONTENT, LV_GRID_FR(1), LV_GRID_CONTENT, 10, LV_GRID_TEMPLATE_LAST }; 
-        static const int32_t rows[] = { LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_TEMPLATE_LAST }; 
+        static constexpr int32_t cols[] = { 10, LV_GRID_CONTENT, LV_GRID_FR(1), LV_GRID_CONTENT, 10, LV_GRID_TEMPLATE_LAST };
+        static constexpr int32_t rows[] = { LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_TEMPLATE_LAST };
 
         lv_obj_set_grid_dsc_array(list_item, cols, rows);
         lv_obj_set_layout(list_item, LV_LAYOUT_GRID);
@@ -139,7 +136,7 @@ private:
 
     static void on_mute_click_raw(lv_event_t* e)
     {
-        auto that = (list_item_t*)lv_event_get_user_data(e);
+        auto that = static_cast<list_item_t*>(lv_event_get_user_data(e));
 
         configASSERT(that);
 
@@ -149,8 +146,8 @@ private:
 
     static void on_volume_changed_raw(lv_event_t* e)
     {
-        auto slider = (lv_obj_t*)lv_event_get_target_obj(e);
-        auto that = (list_item_t*)lv_event_get_user_data(e);
+        auto slider = lv_event_get_target_obj(e);
+        auto that = static_cast<list_item_t*>(lv_event_get_user_data(e));
         auto code = lv_event_get_code(e);
 
         configASSERT(slider && that);
@@ -172,7 +169,7 @@ private:
                     that->_on_mute_changed(false);
 
                 if (that->_on_volume_changed)
-                    that->_on_volume_changed(value);
+                    that->_on_volume_changed(static_cast<uint8_t>(value));
                     
                 break;
             }
@@ -208,14 +205,14 @@ private:
             }
 
             free_data();
-            data = (uint8_t*)lv_malloc(img_data.size());
+            data = static_cast<uint8_t*>(lv_malloc(img_data.size()));
             std::memcpy(data, img_data.data(), img_data.size());
             
             dsc = lv_image_dsc_t
             {
                 .header = {
                     .magic= LV_IMAGE_HEADER_MAGIC,
-                    .cf = (uint8_t)format,
+                    .cf = static_cast<uint8_t>(format),
                     .w = w,
                     .h = h
                 },
@@ -258,6 +255,6 @@ private:
 
     bool _mute;
     bool _slider_editing;
-    std::function<void(int32_t)> _on_volume_changed;
+    std::function<void(uint8_t)> _on_volume_changed;
     std::function<void(bool)> _on_mute_changed;
 };

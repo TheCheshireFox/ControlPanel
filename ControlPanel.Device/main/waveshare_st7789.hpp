@@ -39,7 +39,7 @@ public:
     {
     }
 
-    inline esp_err_t init()
+    esp_err_t init()
     {
         std::unique_lock lock{_sync};
 
@@ -51,12 +51,12 @@ public:
         return ESP_OK;
     }
 
-    inline void backlight(bool enable)
+    void backlight(bool enable)
     {
         std::unique_lock lock{_sync};
 
         if (_bl >= 0) {
-            gpio_set_level((gpio_num_t)_bl, enable);
+            gpio_set_level(_bl, enable);
         }
     }
 
@@ -72,23 +72,22 @@ public:
         t.length    = size * 8;
         t.tx_buffer = buffer;
 
-        esp_err_t err = spi_device_transmit(_spi_dev, &t);
-        if (err != ESP_OK) {
+        if (auto err = spi_device_transmit(_spi_dev, &t); err != ESP_OK) {
             ESP_LOGE(TAG, "flush transmit failed: %s", esp_err_to_name(err));
         }
     }
 
-    inline uint32_t width()  const { return _width;  }
-    inline uint32_t height() const { return _height; }
-    inline orientation_t orientation() const { return _orientation; }
+    uint32_t width()  const { return _width;  }
+    uint32_t height() const { return _height; }
+    orientation_t orientation() const { return _orientation; }
 
 private:
-    inline void delay_ms(uint32_t ms)
+    static void delay_ms(uint32_t ms)
     {
         vTaskDelay(pdMS_TO_TICKS(ms));
     }
 
-    inline esp_err_t config_gpio()
+    esp_err_t config_gpio()
     {
         gpio_config_t io_conf = {};
         io_conf.intr_type = GPIO_INTR_DISABLE;
@@ -103,8 +102,8 @@ private:
 
         io_conf.pin_bit_mask = mask;
 
-        esp_err_t err = gpio_config(&io_conf);
-        if (err != ESP_OK) return err;
+        if (auto err = gpio_config(&io_conf); err != ESP_OK)
+            return err;
 
         set_dc(false);
         backlight(true);
@@ -112,19 +111,21 @@ private:
         return ESP_OK;
     }
 
-    inline esp_err_t config_spi_device()
+    esp_err_t config_spi_device()
     {
-        spi_device_interface_config_t devcfg = {};
-        devcfg.mode = 0;
-        devcfg.clock_speed_hz = _spi_clock_hz;
-        devcfg.spics_io_num = _cs;
-        devcfg.queue_size = 4;
-        devcfg.flags = 0;
+        spi_device_interface_config_t devcfg = {
+            .mode = 0,
+            .clock_source = SPI_CLK_SRC_DEFAULT,
+            .clock_speed_hz = _spi_clock_hz,
+            .spics_io_num = _cs,
+            .flags = 0,
+            .queue_size = 4
+        };
 
         return spi_bus_add_device(_spi_host, &devcfg, &_spi_dev);
     }
 
-    inline void reset_panel()
+    void reset_panel()
     {
         if (_rst < 0) {
             return;
@@ -132,13 +133,13 @@ private:
 
         delay_ms(20);
 
-        gpio_set_level((gpio_num_t)_rst, 0);
+        gpio_set_level(_rst, 0);
         delay_ms(20);
-        gpio_set_level((gpio_num_t)_rst, 1);
+        gpio_set_level(_rst, 1);
         delay_ms(20);
     }
 
-    inline void write_cmd(uint8_t cmd)
+    void write_cmd(uint8_t cmd)
     {
         set_dc(false);
 
@@ -148,7 +149,7 @@ private:
         spi_device_transmit(_spi_dev, &t);
     }
 
-    inline void write_data(const uint8_t *data, size_t len)
+    void write_data(const uint8_t *data, size_t len)
     {
         set_dc(true);
 
@@ -159,11 +160,11 @@ private:
     }
 
     template<typename... Ts>
-    inline void write_data_bytes(Ts... values)
+    void write_data_bytes(Ts... values)
     {
         static_assert(sizeof...(Ts) > 0, "write_data_bytes requires at least one byte");
 
-        static_assert((std::conjunction_v<std::bool_constant<std::is_integral_v<Ts> || std::is_enum_v<Ts>>...>),
+        static_assert(std::conjunction_v<std::bool_constant<std::is_integral_v<Ts> || std::is_enum_v<Ts>>...>,
             "write_data_bytes only accepts integral or enum types");
 
         uint8_t buf[sizeof...(Ts)] = { static_cast<uint8_t>(values)... };
@@ -171,7 +172,7 @@ private:
         write_data(buf, sizeof...(Ts));
     }
 
-    inline void set_window(uint16_t x0, uint16_t y0,
+    void set_window(uint16_t x0, uint16_t y0,
                            uint16_t x1, uint16_t y1)
     {
         write_cmd(0x2A);
@@ -183,7 +184,7 @@ private:
         write_cmd(0x2C);
     }
 
-    inline void init_waveshare_sequence()
+    void init_waveshare_sequence()
     {
         reset_panel();
 
@@ -250,21 +251,19 @@ private:
         write_cmd(0x29);
     }
 
-    inline void set_dc(bool data)
+    void set_dc(bool data)
     {
         if (_dc >= 0)
-        {
-            gpio_set_level((gpio_num_t)_dc, data ? 1 : 0);
-        }
+            gpio_set_level(_dc, data ? 1 : 0);
     }
 
 private:
     spi_host_device_t    _spi_host;
     spi_device_handle_t  _spi_dev;
-    const int            _cs;
-    const int            _dc;
-    const int            _rst;
-    const int            _bl;
+    const gpio_num_t     _cs;
+    const gpio_num_t     _dc;
+    const gpio_num_t     _rst;
+    const gpio_num_t     _bl;
     const uint32_t       _width;
     const uint32_t       _height;
     const int            _spi_clock_hz;

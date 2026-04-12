@@ -30,7 +30,7 @@ class cst328_driver_t {
 
 public:
     cst328_driver_t(i2c_port_t port, uint32_t clock, gpio_num_t sda, gpio_num_t scl, gpio_num_t interrupt = gpio_num_t::GPIO_NUM_NC)
-        : _port(port), _interrupt(interrupt != -1)
+        : _interrupt(interrupt != -1)
     {
         if (interrupt != -1)
         {
@@ -38,8 +38,8 @@ public:
             int_conf.intr_type    = GPIO_INTR_NEGEDGE;
             int_conf.mode         = GPIO_MODE_INPUT;
             int_conf.pin_bit_mask = (1ULL << interrupt);
-            int_conf.pull_down_en = gpio_pulldown_t::GPIO_PULLDOWN_DISABLE;
-            int_conf.pull_up_en   = gpio_pullup_t::GPIO_PULLUP_ENABLE;
+            int_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+            int_conf.pull_up_en   = GPIO_PULLUP_ENABLE;
             ESP_ERROR_CHECK(gpio_config(&int_conf));
         }
         
@@ -69,13 +69,13 @@ public:
         {
             xTaskCreate(THIS_CALLBACK(this, touch_task), "touch_task", 4096, this, 5, &_touch_task_handle);
             configASSERT(_touch_task_handle);
-            ESP_ERROR_CHECK(gpio_isr_handler_add((gpio_num_t)interrupt, touch_int_isr, &_touch_task_handle));
+            ESP_ERROR_CHECK(gpio_isr_handler_add(interrupt, touch_int_isr, static_cast<void*>(&_touch_task_handle)));
         }
     }
 
     void init(bool recalibrate = false)
     {
-        uint8_t cfg[2] = {0};
+        uint8_t cfg[2] = {};
         ESP_ERROR_CHECK(cst328_reg_read(CST328_REG_CONFIG, cfg, sizeof(cfg)));
 
         if (recalibrate)
@@ -94,7 +94,7 @@ public:
         ESP_LOGI(TAG, "Initialized");
     }
 
-    uint16_t width() const 
+    uint16_t width() const
     {
         return _width;
     }
@@ -128,7 +128,7 @@ public:
         if (!_interrupt)
             return;
 
-        _on_touch = std::move(cb);
+        _on_touch = std::forward<F>(cb);
     }
 
 private:
@@ -136,7 +136,7 @@ private:
     {
         ESP_ERROR_CHECK(cst328_cmd_write(CST328_REG_DEBUG_INFO));
 
-        uint8_t buf[4] = {0};
+        uint8_t buf[4] = {};
         ESP_ERROR_CHECK(cst328_reg_read(CST328_REG_RES, buf, sizeof(buf)));
         width = uint16_t(buf[0]) | uint16_t(buf[1]) << 8;
         height = uint16_t(buf[2]) | uint16_t(buf[3]) << 8;
@@ -146,9 +146,9 @@ private:
 
     static void IRAM_ATTR touch_int_isr(void *task_handle)
     {
-        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+        auto xHigherPriorityTaskWoken = pdFALSE;
 
-        vTaskNotifyGiveFromISR(*(TaskHandle_t*)task_handle, &xHigherPriorityTaskWoken);
+        vTaskNotifyGiveFromISR(*static_cast<TaskHandle_t*>(task_handle), &xHigherPriorityTaskWoken);
 
         if (xHigherPriorityTaskWoken) {
             portYIELD_FROM_ISR();
@@ -163,9 +163,8 @@ private:
         {
             ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
-            if (ESP_ERROR_CHECK_WITHOUT_ABORT(cst328_read_xy_single(pt)) != ESP_OK) {
+            if (ESP_ERROR_CHECK_WITHOUT_ABORT(cst328_read_xy_single(pt)) != ESP_OK)
                 continue;
-            }
 
             {
                 std::unique_lock lock{_sync};
@@ -197,7 +196,7 @@ private:
         if (!data || !len)
             return ESP_ERR_INVALID_ARG;
 
-        uint8_t reg_bytes[2] = { (uint8_t)(reg >> 8), (uint8_t)(reg & 0xFF) };
+        uint8_t reg_bytes[2] = { static_cast<uint8_t>(reg >> 8), static_cast<uint8_t>(reg & 0xFF) };
         i2c_master_transmit_multi_buffer_info_t buf[2] = {
             { .write_buffer = reg_bytes, .buffer_size = sizeof(reg_bytes) },
             { .write_buffer = data, .buffer_size = len }
@@ -229,13 +228,12 @@ private:
     }
 
 private:
-    i2c_port_t _port;
-    TaskHandle_t _touch_task_handle;
+    TaskHandle_t _touch_task_handle{};
     std::recursive_mutex _sync;
     touch_point_t _last_point;
     std::function<void(const touch_point_t&)> _on_touch;
     const bool _interrupt;
-    i2c_master_dev_handle_t _dev;
-    uint16_t _width;
-    uint16_t _height;
+    i2c_master_dev_handle_t _dev{};
+    uint16_t _width{};
+    uint16_t _height{};
 };

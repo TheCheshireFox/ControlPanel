@@ -5,13 +5,10 @@
 #include <map>
 #include <memory>
 #include <tuple>
-#include <vector>
 #include <set>
 
 #include "lvgl.h"
 #include "utils/lv_sync.hpp"
-
-#include "utils/esp_utility.hpp"
 
 #include "protocol/protocol.hpp"
 #include "ui/style.hpp"
@@ -107,19 +104,19 @@ public:
     template<typename F>
     void on_volume_change(F&& cb)
     {
-        _on_volume_changed = std::move(cb);
+        _on_volume_changed = std::forward<F>(cb);
     }
 
     template<typename F>
     void on_mute_change(F&& cb)
     {
-        _on_mute_changed = std::move(cb);
+        _on_mute_changed = std::forward<F>(cb);
     }
 
     template<typename F>
     void on_icon_missing(F&& cb)
     {
-        _on_icon_missing = std::move(cb);
+        _on_icon_missing = std::forward<F>(cb);
     }
 
     ~volume_display_t()
@@ -130,7 +127,7 @@ public:
     }
 
 private:
-    void volume_change(const event_id& id, int32_t value)
+    void volume_change(const event_id& id, int8_t value)
     {
         ESP_LOGD(TAG, "%s", "volume_change");
         if (_on_volume_changed)
@@ -183,10 +180,10 @@ private:
         auto& list_item = it->second.list_item;
 
         list_item->set_title(LV_COLOR_FORMAT_A8, title.width, title.height, title.sprite);
-        list_item->set_volume((int32_t)(volume * 100));
+        list_item->set_volume(static_cast<int8_t>(volume * 100));
         list_item->set_mute(mute);
         list_item->on_mute_changed([id, this](bool mute) { mute_change(id, mute); });
-        list_item->on_volume_changed([id, this](int32_t volume) { volume_change(id, volume); });
+        list_item->on_volume_changed([id, this](int8_t volume) { volume_change(id, volume); });
 
         if (_on_icon_missing)
             _on_icon_missing(source, id.agent_id);

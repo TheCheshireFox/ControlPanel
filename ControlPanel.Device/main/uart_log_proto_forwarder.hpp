@@ -3,12 +3,12 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "esp_log.h"
-#include "esp_rom_sys.h"
 
 #include "utils/esp_utility.hpp"
 #include "protocol/frame_host_connection.hpp"
@@ -38,7 +38,7 @@ public:
 private:
     static int log_vprintf_hook(const char* fmt, va_list ap)
     {
-        if (__atomic_exchange_n(&_in_hook, 1, __ATOMIC_ACQ_REL) != 0) {
+        if (__atomic_exchange_n(&_in_hook, true, __ATOMIC_ACQ_REL) != 0) {
             return 0;
         }
 
@@ -49,42 +49,41 @@ private:
         auto sz = vsnprintf(nullptr, 0, fmt, ap_sz);
         va_end(ap_sz);
 
-        char buf[sz + 1];
+        std::unique_ptr<char[]> buf(new char[sz + 1]);
 
         va_list ap_str;
         va_copy(ap_str, ap);
-        vsnprintf(buf, sz + 1, fmt, ap_str);
+        vsnprintf(buf.get(), sz + 1, fmt, ap_str);
         va_end(ap_str);
 
         for (auto i = 0; i < sz / (LOG_LINE_MAX - 1); i++)
         {
             line.len = LOG_LINE_MAX - 1;
-            std::memcpy(line.buf, buf + i * (LOG_LINE_MAX - 1), LOG_LINE_MAX - 1);
+            std::memcpy(line.buf, buf.get() + i * (LOG_LINE_MAX - 1), LOG_LINE_MAX - 1);
             line.buf[LOG_LINE_MAX - 1] = 0;
 
             enqueue_line(line);
         }
 
-        auto remain = sz % (LOG_LINE_MAX - 1);
-        if (remain > 0)
+        if (auto remain = sz % (LOG_LINE_MAX - 1); remain > 0)
         {
             line.len = remain;
-            std::memcpy(line.buf, buf + (sz - remain), remain);
+            std::memcpy(line.buf, buf.get() + (sz - remain), remain);
             line.buf[remain] = 0;
 
             enqueue_line(line);
         }
         
-        __atomic_store_n(&_in_hook, 0, __ATOMIC_RELEASE);
+        __atomic_store_n(&_in_hook, false, __ATOMIC_RELEASE);
 
         return sz;
     }
 
-    static void enqueue_line(log_line_t& line)
+    static void enqueue_line(const log_line_t& line)
     {
         if (xPortInIsrContext())
         {
-            BaseType_t task_woken = pdFALSE;
+            auto task_woken = pdFALSE;
             xQueueSendFromISR(_queue, &line, &task_woken);
             if (task_woken) portYIELD_FROM_ISR();
         } else

@@ -2,13 +2,13 @@
 
 #include "utils/esp_utility.hpp"
 
-template<typename TBacklighController>
+template<typename TBacklightController>
 class backlight_timer_t
 {
     static constexpr char TAG[] = "BL";
 
 public:
-    backlight_timer_t(TBacklighController& backlight_controller, uint64_t timeout_ms)
+    backlight_timer_t(TBacklightController& backlight_controller, uint64_t timeout_ms)
         : _backlight_controller(backlight_controller)
         , _timeout_ms(timeout_ms)
         , _timer(create_timer())
@@ -65,7 +65,7 @@ private:
     }
 
 private:
-    TBacklighController& _backlight_controller;
+    TBacklightController& _backlight_controller;
     uint64_t _timeout_ms;
     esp_timer_ptr _timer;
 };

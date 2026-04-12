@@ -42,7 +42,7 @@ namespace ArduinoJson
         static std::span<const uint8_t> fromJson(JsonVariantConst src)
         {
             auto bin = src.as<MsgPackBinary>();
-            return std::span<const uint8_t>{(uint8_t*)bin.data(), bin.size()};
+            return std::span{static_cast<const uint8_t*>(bin.data()), bin.size()};
         }
     };
 }

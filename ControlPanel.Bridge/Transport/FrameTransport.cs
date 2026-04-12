@@ -7,11 +7,11 @@ using Microsoft.Extensions.Options;
 
 namespace ControlPanel.Bridge.Transport;
 
-public sealed class UartFrameTransport : IFrameTransport, IAsyncDisposable
+public sealed class FrameTransport : IFrameTransport, IAsyncDisposable
 {
     private readonly ITransportStreamProvider _streamProvider;
     private readonly TimeSpan _reconnectInterval;
-    private readonly ILogger<UartFrameTransport> _logger;
+    private readonly ILogger<FrameTransport> _logger;
     private readonly CancellableTask _connectionLoop;
 
     private readonly BlockingQueue<MemoryRentBlock> _fromStream = new();
@@ -19,7 +19,7 @@ public sealed class UartFrameTransport : IFrameTransport, IAsyncDisposable
     
     public event Func<CancellationToken, Task>? OnReconnectedAsync;
     
-    public UartFrameTransport(IOptions<TransportOptions> options, ITransportStreamProvider streamProvider, ILogger<UartFrameTransport> logger)
+    public FrameTransport(IOptions<TransportOptions> options, ITransportStreamProvider streamProvider, ILogger<FrameTransport> logger)
     {
         _streamProvider = streamProvider;
         _logger = logger;

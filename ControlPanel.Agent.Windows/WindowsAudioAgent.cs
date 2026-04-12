@@ -2,23 +2,24 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using ControlPanel.Agent.Shared;
+using ControlPanel.Agent.Windows.WindowsAudioSystem;
 using ControlPanel.Shared;
 using ControlPanel.Shared.Extensions;
-using NAudio.CoreAudioApi;
 using NAudio.CoreAudioApi.Interfaces;
 
 namespace ControlPanel.Agent.Windows;
 
 internal sealed class WindowsAudioAgent : IAudioAgent, IDisposable
 {
+    private readonly IAudioSessionProvider _audioSessionProvider;
     private readonly IIconLocator _iconLocator;
-    
     private readonly SessionIdMapper _idMapper = new();
     private readonly Task _idMapperPruneTask;
     private readonly CancellationTokenSource _cts = new();
 
-    public WindowsAudioAgent(IIconLocator iconLocator)
+    public WindowsAudioAgent(IAudioSessionProvider audioSessionProvider, IIconLocator iconLocator)
     {
+        _audioSessionProvider = audioSessionProvider;
         _iconLocator = iconLocator;
         _idMapperPruneTask = Task.Run(PruneMapperAsync);
     }
@@ -33,22 +34,21 @@ internal sealed class WindowsAudioAgent : IAudioAgent, IDisposable
     public async Task<AudioStream[]> GetAudioStreamsAsync(CancellationToken cancellationToken)
     {
         var result = new Dictionary<string, AudioStream>();
-        
-        using var sessions = new AudioSessionsCollection();
 
-        foreach (var session in sessions.Where(x => x is { IsSystemSoundsSession: false, State: AudioSessionState.AudioSessionStateActive }))
+        var activeSessions = _audioSessionProvider.Sessions
+            .Where(x => x is { IsSystemSoundsSession: false, State: AudioSessionState.AudioSessionStateActive });
+
+        foreach (var session in activeSessions)
         {
-            var id = await _idMapper.GetMappedIdAsync(session.GetSessionInstanceIdentifier, cancellationToken);
-            var simpleVolume = session.SimpleAudioVolume;
-
+            var id = await _idMapper.GetMappedIdAsync(session.Id, cancellationToken);
             var name = GetSessionName(session);
 
             var stream = new AudioStream(
                 Id: id,
-                Source: ProcessUtility.GetBinaryPath((int)session.GetProcessID) ?? string.Empty,
+                Source: ProcessUtility.GetBinaryPath(session.ProcessId) ?? string.Empty,
                 Name: name,
-                Mute: simpleVolume.Mute,
-                Volume: simpleVolume.Volume
+                Mute: session.Mute,
+                Volume: session.Volume
             );
 
             result[stream.Id] = stream;
@@ -59,20 +59,16 @@ internal sealed class WindowsAudioAgent : IAudioAgent, IDisposable
 
     public async Task SetVolumeAsync(string id, double volume, CancellationToken cancellationToken)
     {
-        using var sessions = new AudioSessionsCollection();
-        
-        var session = await FindSessionAsync(sessions, id, cancellationToken);
+        var session = await FindSessionAsync(id, cancellationToken);
         if (session != null)
-            session.SimpleAudioVolume.Volume = (float)Math.Clamp(volume, 0.0, 1.0);
+            session.Volume = (float)Math.Clamp(volume, 0.0, 1.0);
     }
 
     public async Task ToggleMuteAsync(string id, bool mute, CancellationToken cancellationToken)
     {
-        using var sessions = new AudioSessionsCollection();
-        
-        var session = await FindSessionAsync(sessions, id, cancellationToken);
+        var session = await FindSessionAsync(id, cancellationToken);
         if (session != null)
-            session.SimpleAudioVolume.Mute = mute;
+            session.Mute = mute;
     }
 
     public Task<AudioStreamIcon> GetAudioStreamIconAsync(string source, CancellationToken cancellationToken)
@@ -88,8 +84,7 @@ internal sealed class WindowsAudioAgent : IAudioAgent, IDisposable
 
             try
             {
-                using var sessions = new AudioSessionsCollection();
-                await _idMapper.PruneAsync(sessions.Select(x => x.GetSessionInstanceIdentifier), _cts.Token);
+                await _idMapper.PruneAsync(_audioSessionProvider.Sessions.Select(x => x.Id), _cts.Token);
             }
             catch (Exception) when (!_cts.IsCancellationRequested)
             {
@@ -98,13 +93,14 @@ internal sealed class WindowsAudioAgent : IAudioAgent, IDisposable
         }
     }
     
-    private async Task<AudioSessionControl?> FindSessionAsync(AudioSessionsCollection sessions, string mapId, CancellationToken cancellationToken)
+    private async Task<AudioSession?> FindSessionAsync(string mapId, CancellationToken cancellationToken)
     {
         var sessionId = await _idMapper.FindSessionIdAsync(mapId, cancellationToken);
         if (sessionId == null)
             return null;
 
-        var session = sessions.FirstOrDefault(x => string.Equals(x.GetSessionInstanceIdentifier, sessionId, StringComparison.Ordinal));
+        var session = _audioSessionProvider.Sessions
+            .FirstOrDefault(x => string.Equals(x.Id, sessionId, StringComparison.Ordinal));
         if (session != null)
             return session;
         
@@ -112,7 +108,7 @@ internal sealed class WindowsAudioAgent : IAudioAgent, IDisposable
         return null;
     }
     
-    private static string GetSessionName(AudioSessionControl session)
+    private static string GetSessionName(AudioSession session)
     {
         var displayName = session.DisplayName;
         if (LooksLikeResourceString(displayName))
@@ -123,10 +119,10 @@ internal sealed class WindowsAudioAgent : IAudioAgent, IDisposable
         
         try
         {
-            var pid = session.GetProcessID;
+            var pid = session.ProcessId;
             if (pid != 0)
             {
-                using var process = Process.GetProcessById((int)pid);
+                using var process = Process.GetProcessById(pid);
 
                 if (!string.IsNullOrWhiteSpace(process.MainWindowTitle))
                     return process.MainWindowTitle;

@@ -1,13 +1,16 @@
 using ControlPanel.Bridge.Agent;
 using ControlPanel.Bridge.Extensions;
 using ControlPanel.Bridge.Protocol;
-using ControlPanel.Protocol;
+using GetIconMessage = ControlPanel.Bridge.Protocol.GetIconMessage;
+using SetMuteMessage = ControlPanel.Bridge.Protocol.SetMuteMessage;
+using SetVolumeMessage = ControlPanel.Bridge.Protocol.SetVolumeMessage;
+using StreamsMessage = ControlPanel.Bridge.Protocol.StreamsMessage;
 
 namespace ControlPanel.Bridge;
 
 public interface IBridgeCommandHandler
 {
-    Task HandleAsync(UartMessage message, CancellationToken cancellationToken);
+    Task HandleAsync(Message message, CancellationToken cancellationToken);
 }
 
 public class BridgeCommandHandler : IBridgeCommandHandler
@@ -34,26 +37,29 @@ public class BridgeCommandHandler : IBridgeCommandHandler
         _logger = logger;
     }
 
-    public async Task HandleAsync(UartMessage message, CancellationToken cancellationToken)
+    public async Task HandleAsync(Message message, CancellationToken cancellationToken)
     {
         try
         {
             switch (message)
             {
-                case UartSetVolumeMessage setVolume:
+                case SetVolumeMessage setVolume:
                     await TrySendAsync(setVolume.Id.AgentId, setVolume, cancellationToken);
                     break;
-                case UartSetMuteMessage setMute:
+                case SetMuteMessage setMute:
                     await TrySendAsync(setMute.Id.AgentId, setMute, cancellationToken);
                     break;
-                case UartGetIconMessage getIcons:
+                case GetIconMessage getIcons:
                     await TrySendIconAsync(getIcons.Source, getIcons.AgentId, cancellationToken);
                     break;
-                case UartRequestRefreshMessage:
+                case RequestRefreshMessage:
                     await SendAllStreamsAsync(cancellationToken);
                     break;
-                case UartLogMessage logMessage:
+                case LogMessage logMessage:
                     PrintLogs(logMessage);
+                    break;
+                case TextRendererParametersMessage textRendererParams:
+                    _textRenderer.SetParameters(textRendererParams.Dpi, textRendererParams.FontSize, textRendererParams.MaxSpriteWidth);
                     break;
                 default:
                     _logger.LogWarning("Unknown message type {Type}", message.Type);
@@ -66,21 +72,21 @@ public class BridgeCommandHandler : IBridgeCommandHandler
         }
     }
 
-    private async Task TrySendAsync(string agentId, UartMessage uartMessage, CancellationToken cancellationToken)
+    private async Task TrySendAsync(string agentId, Message message, CancellationToken cancellationToken)
     {
-        if (!await _agents.TrySendAsync(agentId, BridgeProtocolMapper.ToTransport(uartMessage), cancellationToken))
-            _logger.LogWarning("Failed to send message {Type} to agent {Agent}", uartMessage.Type, agentId);
+        if (!await _agents.TrySendAsync(agentId, BridgeProtocolMapper.ToTransport(message), cancellationToken))
+            _logger.LogWarning("Failed to send message {Type} to agent {Agent}", message.Type, agentId);
     }
 
     private async Task TrySendIconAsync(string source, string agentId, CancellationToken cancellationToken)
     {
         if (_audioStreamIconCache.TryGetIcon(source, agentId, out var icon))
         {
-            await _connection.SendMessageAsync(new UartIconMessage(source, agentId, icon.Size, icon.Icon), cancellationToken);
+            await _connection.SendMessageAsync(new IconMessage(source, agentId, icon.Size, icon.Icon), cancellationToken);
         }
         else
         {
-            await _agents.TrySendAsync(agentId, new GetIconMessage(source), cancellationToken);
+            await _agents.TrySendAsync(agentId, new ControlPanel.Protocol.GetIconMessage(source), cancellationToken);
         }
     }
 
@@ -88,10 +94,10 @@ public class BridgeCommandHandler : IBridgeCommandHandler
     {
         var streamsInfoAsDiff = (await _audioStreamRepository.GetAllAsync(cancellationToken)).Select(AudioStreamDiff.FromStreamInfo).ToArray();
         var (updated, deleted) = new AudioStreamIncrementalSnapshot(streamsInfoAsDiff, []).ToUartAudioStreams(_textRenderer);
-        await _connection.SendMessageAsync(new UartStreamsMessage(updated, deleted), cancellationToken);
+        await _connection.SendMessageAsync(new StreamsMessage(updated, deleted), cancellationToken);
     }
 
-    private void PrintLogs(UartLogMessage logMessage)
+    private void PrintLogs(LogMessage logMessage)
     {
         var lines = logMessage.Line
             .Trim('\r')

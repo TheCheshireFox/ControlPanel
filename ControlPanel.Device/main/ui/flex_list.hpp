@@ -1,11 +1,8 @@
 #pragma once
 
 #include <set>
-#include <functional>
 
 #include "lvgl.h"
-
-#include "utils/esp_utility.hpp"
 
 class flex_list_t
 {
@@ -17,7 +14,7 @@ public:
         _list = lv_obj_create(parent);
         lv_obj_set_pos(_list, x, y);
         lv_obj_set_size(_list, w, h);
-        lv_obj_set_scroll_dir(_list, lv_dir_t::LV_DIR_VER);
+        lv_obj_set_scroll_dir(_list, LV_DIR_VER);
         lv_obj_set_scrollbar_mode(_list, LV_SCROLLBAR_MODE_AUTO);
 
         lv_obj_set_flex_flow(_list, LV_FLEX_FLOW_COLUMN);
@@ -34,7 +31,7 @@ public:
         auto item = lv_obj_create(_list);
         lv_obj_set_width(item, LV_PCT(100));
         lv_obj_set_height(item, LV_SIZE_CONTENT);
-        lv_obj_set_scroll_dir(item, lv_dir_t::LV_DIR_NONE);
+        lv_obj_set_scroll_dir(item, LV_DIR_NONE);
         lv_obj_set_scrollbar_mode(item, LV_SCROLLBAR_MODE_OFF);
 
         lv_obj_add_style(item, _item_style, 0);

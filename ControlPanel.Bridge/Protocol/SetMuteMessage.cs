@@ -3,7 +3,7 @@ using MessagePack;
 namespace ControlPanel.Bridge.Protocol;
 
 [MessagePackObject(true)]
-public record UartSetMuteMessage(
-    [property: Key("id")] UartAudioStreamId Id,
+public record SetMuteMessage(
+    [property: Key("id")] AudioStreamId Id,
     [property: Key("mute")] bool Mute)
-    : UartMessage(UartMessageType.SetMute);
+    : Message(MessageType.SetMute);

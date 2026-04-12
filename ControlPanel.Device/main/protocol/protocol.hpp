@@ -14,7 +14,7 @@
 #include "ArduinoJson.h"
 #include "utils/arduino_json_utils.hpp"
 
-enum bridge_message_type_t : int8_t
+enum class bridge_message_type_t : int8_t
 {
     none = -1,
     streams,
@@ -25,6 +25,8 @@ enum bridge_message_type_t : int8_t
     request_refresh,
     log_line
 };
+inline bool convertToJson(const bridge_message_type_t& type, JsonVariant dst) { return dst.set(static_cast<int8_t>(type)); }
+inline void convertFromJson(JsonVariantConst src, bridge_message_type_t& type) { type = static_cast<bridge_message_type_t>(src.as<int8_t>()); }
 
 template<bridge_message_type_t Type>
 struct bridge_message_base_t
@@ -59,14 +61,14 @@ struct bridge_audio_stream_t
 };
 SIMPLE_CONVERT_FROM_JSON(bridge_audio_stream_t, id, source, name, mute, volume);
 
-struct streams_message_t : public bridge_message_base_t<bridge_message_type_t::streams>
+struct streams_message_t : bridge_message_base_t<bridge_message_type_t::streams>
 {
     std::vector<bridge_audio_stream_t> updated;
     std::vector<bridge_audio_stream_id_t> deleted;
 };
 SIMPLE_CONVERT_FROM_JSON(streams_message_t, type, updated, deleted);
 
-struct icon_message_t : public bridge_message_base_t<bridge_message_type_t::icon>
+struct icon_message_t : bridge_message_base_t<bridge_message_type_t::icon>
 {
     std::string source;
     std::string agent_id;
@@ -75,34 +77,34 @@ struct icon_message_t : public bridge_message_base_t<bridge_message_type_t::icon
 };
 SIMPLE_CONVERT_FROM_JSON(icon_message_t, type, source, agent_id, size, icon);
 
-struct set_mute_message_t : public bridge_message_base_t<bridge_message_type_t::set_mute>
+struct set_mute_message_t : bridge_message_base_t<bridge_message_type_t::set_mute>
 {
     bridge_audio_stream_id_t id;
     bool mute;
 };
 SIMPLE_CONVERT_TO_JSON(set_mute_message_t, type, id, mute);
 
-struct set_volume_message_t : public bridge_message_base_t<bridge_message_type_t::set_volume>
+struct set_volume_message_t : bridge_message_base_t<bridge_message_type_t::set_volume>
 {
     bridge_audio_stream_id_t id;
     float volume;
 };
 SIMPLE_CONVERT_TO_JSON(set_volume_message_t, type, id, volume);
 
-struct get_icon_message_t : public bridge_message_base_t<bridge_message_type_t::get_icon>
+struct get_icon_message_t : bridge_message_base_t<bridge_message_type_t::get_icon>
 {
     std::string source;
     std::string agent_id;
 };
 SIMPLE_CONVERT_TO_JSON(get_icon_message_t, type, source, agent_id);
 
-struct request_refresh_message_t : public bridge_message_base_t<bridge_message_type_t::request_refresh>
+struct request_refresh_message_t : bridge_message_base_t<bridge_message_type_t::request_refresh>
 {
 
 };
 SIMPLE_CONVERT_TO_JSON(request_refresh_message_t, type);
 
-struct log_message_t : public bridge_message_base_t<bridge_message_type_t::log_line>
+struct log_message_t : bridge_message_base_t<bridge_message_type_t::log_line>
 {
     std::string line;
 };
@@ -136,7 +138,7 @@ inline bridge_message_t parse_bridge_message(std::span<const uint8_t> msg_data)
 }
 
 template<typename T>
-inline std::span<uint8_t> serialize_bridge_message(const T& message)
+std::span<uint8_t> serialize_bridge_message(const T& message)
 {
     static dynamic_writer_t writer = {};
 

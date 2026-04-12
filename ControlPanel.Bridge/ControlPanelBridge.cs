@@ -53,7 +53,7 @@ public class ControlPanelBridge : BackgroundService
             return;
         
         var (updated, deleted) = snapshot.ToUartAudioStreams(_textRenderer);
-        var msg = new UartStreamsMessage(updated, deleted);
+        var msg = new StreamsMessage(updated, deleted);
         
         _logger.LogDebug("Sending streams, updated: {Updated}, deleted: {Deleted}", updated.Length, deleted.Length);
 

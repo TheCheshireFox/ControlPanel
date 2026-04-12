@@ -60,11 +60,11 @@ namespace transport
             writer.write<const uint8_t>(_magic);
             writer.write<len_t>(frame.data.size());
             writer.write<seq_t>(frame.seq);
-            writer.write<type_t>((uint8_t)frame.type);
+            writer.write<type_t>(static_cast<uint8_t>(frame.type));
             writer.write<uint8_t>(frame.data);
             writer.write<uint16_t>(crc16_ccitt(writer.used_data()));
 
-            ESP_LOGD(TAG, "frame to bytes seq=%d type=%d size=%d", frame.seq, (uint8_t)frame.type, frame.data.size());
+            ESP_LOGD(TAG, "frame to bytes seq=%d type=%d size=%d", frame.seq, static_cast<uint8_t>(frame.type), frame.data.size());
 
             return writer.size_bytes();
         }
@@ -72,7 +72,7 @@ namespace transport
         template<frame_field_t... excludes>
         static constexpr uint16_t calc_frame_size(uint16_t data_size)
         {
-            uint16_t ret = data_size;
+            auto ret = data_size;
             
             constexpr std::array<frame_field_t, sizeof...(excludes)> ex{ excludes... };
 
@@ -120,7 +120,7 @@ namespace transport
 
                 auto reader_span = span.subspan(_last_frame_start);
 
-                etl::byte_stream_reader reader((void*)reader_span.data(), reader_span.size(), etl::endian::big);
+                etl::byte_stream_reader reader(static_cast<void*>(reader_span.data()), reader_span.size(), etl::endian::big);
                 reader.skip<uint8_t>(_magic.size());
 
                 auto len = reader.read<len_t>();
@@ -135,8 +135,8 @@ namespace transport
                 if (!type)
                     return;
                 
-                auto data = reader.free_data().subspan(0, *len);
-                if (!reader.skip<uint8_t>(data.size()))
+                auto frame_data = reader.free_data().subspan(0, *len);
+                if (!reader.skip<uint8_t>(frame_data.size()))
                     return;
 
                 auto crc16 = reader.read<ushort>();
@@ -147,7 +147,7 @@ namespace transport
 
                 if (frame_crc16 == crc16)
                 {
-                    on_frame(frame_t{*seq, (frame_type_t)*type, {(uint8_t*)data.data(), data.size()}});
+                    on_frame(frame_t{*seq, static_cast<frame_type_t>(*type), {(uint8_t*)frame_data.data(), frame_data.size()}});
                 }
                 else
                 {
@@ -161,7 +161,7 @@ namespace transport
         }
 
     private:
-        uint16_t crc16_ccitt(auto span)
+        static uint16_t crc16_ccitt(auto span)
         {
             etl::crc16_ccitt_t<4> crc(span.begin(), span.end());
             return crc.value();
