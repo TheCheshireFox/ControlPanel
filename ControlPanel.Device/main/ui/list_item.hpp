@@ -17,25 +17,24 @@ public:
 
         _app_icon = {parent};
         _mute_click_area = lv_obj_create(parent);
-        _title = {parent};
+        _title_label = lv_label_create(parent);
         _slider = lv_slider_create(parent);
         _slider_label = lv_label_create(parent);
 
         lv_obj_add_style(_app_icon.img, app_style::app_icon_img, 0);
         lv_obj_add_style(_mute_click_area, app_style::mute_click_area, 0);
-        lv_obj_add_style(_title.img, app_style::title, 0);
+        lv_obj_add_style(_title_label, app_style::title_label, 0);
         lv_obj_add_style(_slider, app_style::slider, LV_PART_MAIN | LV_PART_INDICATOR | LV_PART_KNOB);
         lv_obj_add_style(_slider_label, app_style::slider_label, 0);
 
-        lv_image_set_inner_align(_title.img, LV_IMAGE_ALIGN_TOP_LEFT);
-
+        lv_label_set_long_mode(_title_label, LV_LABEL_LONG_MODE_DOTS);
         lv_label_set_long_mode(_slider_label, LV_LABEL_LONG_MODE_CLIP);
 
         lv_slider_set_range(_slider, 0, 100);
 
         lv_obj_add_flag(_app_icon.img, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_flag(_mute_click_area, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_flag(_title.img, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_flag(_title_label, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_flag(_slider_label, LV_OBJ_FLAG_CLICKABLE);
         
         lv_obj_add_event_cb(_slider, +[](lv_event_t* e)
@@ -59,9 +58,9 @@ public:
         _app_icon.set(format, w, h, data);
     }
 
-    void set_title(lv_color_format_t format, uint32_t w, uint32_t h, std::span<const uint8_t> data)
+    void set_title(const std::string& title)
     {
-        _title.set(format, w, h, data);
+        lv_label_set_text(_title_label, title.c_str());
     }
 
     void set_mute(bool mute)
@@ -127,7 +126,7 @@ private:
         // row 0
         lv_obj_set_grid_cell(_mute_click_area, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_STRETCH, 0, 2);
         lv_obj_set_grid_cell(_app_icon.img, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 0, 2);
-        lv_obj_set_grid_cell(_title.img, LV_GRID_ALIGN_STRETCH, 2, 2, LV_GRID_ALIGN_CENTER, 0, 1);
+        lv_obj_set_grid_cell(_title_label, LV_GRID_ALIGN_STRETCH, 2, 2, LV_GRID_ALIGN_CENTER, 0, 1);
         
         // row 1
         lv_obj_set_grid_cell(_slider, LV_GRID_ALIGN_STRETCH, 2, 1, LV_GRID_ALIGN_CENTER, 1, 1);
@@ -249,7 +248,7 @@ private:
 private:
     lv_obj_t* _mute_click_area;
     image_t _app_icon;
-    image_t _title;
+    lv_obj_t* _title_label;
     lv_obj_t* _slider;
     lv_obj_t* _slider_label;
 

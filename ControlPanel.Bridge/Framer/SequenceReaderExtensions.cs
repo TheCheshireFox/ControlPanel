@@ -15,20 +15,4 @@ public static class SequenceReaderExtensions
         value = (ushort)v;
         return true;
     }
-
-    public static bool TryReadExactBytes(ref this SequenceReader<byte> reader, int count, out byte[] bytes)
-    {
-        if (reader.Remaining < count)
-        {
-            bytes = null!;
-            return false;
-        }
-        
-        bytes = new byte[count];
-        if (!reader.TryCopyTo(bytes))
-            return false;
-        
-        reader.Advance(count);
-        return true;
-    }
 }

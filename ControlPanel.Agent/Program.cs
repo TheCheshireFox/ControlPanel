@@ -1,11 +1,12 @@
-﻿using System.Globalization;
-using System.Text;
-using ControlPanel.Agent.Linux;
+﻿using ControlPanel.Agent.Linux;
+using ControlPanel.Agent.Messaging;
 using ControlPanel.Agent.Options;
 using ControlPanel.Agent.Shared;
 using ControlPanel.Agent.Windows;
+using ControlPanel.Protocol;
 using ControlPanel.Shared;
 using ControlPanel.Shared.Logging;
+using ControlPanel.Shared.Messaging;
 using ControlPanel.WebSocket;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -18,8 +19,6 @@ public class Program
 {
     public static async Task Main(string[] args)
     {
-        SetUpEncoding();
-
         var builder = Host.CreateApplicationBuilder(args);
 
         builder.Configuration
@@ -33,7 +32,9 @@ public class Program
             loggingBuilder.AddConsoleFormatter<TemplateConsoleFormatter, TemplateConsoleFormatterOptions>();
         });
 
-        builder.Services.AddSingleton<IWebSocketFactory, WebSocketFactory>();
+        AddMessaging(builder.Services);
+        AddAgentServices(builder.Services);
+
         builder.Services.AddHostedService<AgentService>();
         
         var agentHost = CreateAudioAgentHost();
@@ -42,14 +43,21 @@ public class Program
         await builder.Build().RunAsync();
     }
 
-    private static void SetUpEncoding()
+    private static void AddAgentServices(IServiceCollection services)
     {
-        Encoding.RegisterProvider(new AliasEncodingProvider(new Dictionary<string, Encoding>
+        services.AddScopedProxy<IWebSocket>();
+        services.AddScoped<IAudioStreamSnapshotService>();
+        services.AddSingleton<IWebSocketFactory, WebSocketFactory>();
+    }
+    
+    private static void AddMessaging(IServiceCollection services)
+    {
+        services.AddMediator(options =>
         {
-            ["utf8"] = Encoding.UTF8
-        }));
-        CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
-        CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.InvariantCulture;
+            options.ServiceLifetime = ServiceLifetime.Scoped;
+            options.Assemblies = [typeof(Program)];
+        });
+        services.AddMessaging<AgentMessage>(x => x.WithTransport<AgentMessageTransport>());
     }
     
     private static IAudioAgentHost CreateAudioAgentHost()

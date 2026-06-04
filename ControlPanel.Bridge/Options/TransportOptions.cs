@@ -1,13 +1,8 @@
 namespace ControlPanel.Bridge.Options;
 
-public enum TransportType
-{
-    Serial,
-    BtRfcomm
-}
-
 public class TransportOptions
 {
-    public required TransportType Type { get; init; }
-    public required TimeSpan ReconnectInterval { get; init; }
+    public required string Tty { get; init; }
+    public required int BaudRate { get; init; } = 115200;
+    public required TimeSpan ReconnectInterval { get; init; } = TimeSpan.FromSeconds(30);
 }

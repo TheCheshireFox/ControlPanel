@@ -1,0 +1,15 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\ControlPanel.AgentProtocol\ControlPanel.AgentProtocol.csproj" />
+      <ProjectReference Include="..\ControlPanel.Shared\ControlPanel.Shared.csproj" />
+      <ProjectReference Include="..\ControlPanel.WebSocket\ControlPanel.WebSocket.csproj" />
+    </ItemGroup>
+
+</Project>

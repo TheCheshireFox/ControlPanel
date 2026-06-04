@@ -1,3 +1,4 @@
 dependencies:
   lvgl/lvgl: '*'
   bblanchon/arduinojson: '*'
+  espressif/esp_tinyusb: '*'

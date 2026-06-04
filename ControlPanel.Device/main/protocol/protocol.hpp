@@ -22,8 +22,7 @@ enum class bridge_message_type_t : int8_t
     set_mute,
     icon,
     get_icon,
-    request_refresh,
-    log_line
+    request_refresh
 };
 inline bool convertToJson(const bridge_message_type_t& type, JsonVariant dst) { return dst.set(static_cast<int8_t>(type)); }
 inline void convertFromJson(JsonVariantConst src, bridge_message_type_t& type) { type = static_cast<bridge_message_type_t>(src.as<int8_t>()); }
@@ -42,20 +41,11 @@ struct bridge_audio_stream_id_t
 SIMPLE_CONVERT_TO_JSON(bridge_audio_stream_id_t, id, agent_id);
 SIMPLE_CONVERT_FROM_JSON(bridge_audio_stream_id_t, id, agent_id);
 
-struct name_sprite_t
-{
-    std::string name;
-    std::span<const uint8_t> sprite; // huge
-    int width;
-    int height;
-};
-SIMPLE_CONVERT_FROM_JSON(name_sprite_t, name, sprite, width, height);
-
 struct bridge_audio_stream_t
 {
     bridge_audio_stream_id_t id;
     std::string source;
-    std::optional<name_sprite_t> name;
+    std::optional<std::string> name;
     std::optional<bool> mute;
     std::optional<float> volume;
 };
@@ -104,16 +94,9 @@ struct request_refresh_message_t : bridge_message_base_t<bridge_message_type_t::
 };
 SIMPLE_CONVERT_TO_JSON(request_refresh_message_t, type);
 
-struct log_message_t : bridge_message_base_t<bridge_message_type_t::log_line>
-{
-    std::string line;
-};
-SIMPLE_CONVERT_TO_JSON(log_message_t, type, line);
-
 namespace protocol
 {
-    inline static constexpr char TAG[] = "MSGPACK";
-    inline static constexpr char SERIALIZE_TAG[] = "MSGPACK SZ";
+    inline static constexpr char TAG[] = "MsgPack";
 }
 
 using bridge_message_t = std::variant<std::monostate, streams_message_t, icon_message_t>;
@@ -122,10 +105,13 @@ inline bridge_message_t parse_bridge_message(std::span<const uint8_t> msg_data)
 {
     static JsonDocument doc;
 
-    deserializeMsgPack(doc, msg_data.data(), msg_data.size());
-    
-    auto type = doc["type"].as<bridge_message_type_t>();
-    switch (type)
+    if (auto err = deserializeMsgPack(doc, msg_data.data(), msg_data.size()); err != DeserializationError::Ok)
+    {
+        ESP_LOGE(protocol::TAG, "Deserialization error: %d", err);
+        return {};
+    }
+
+    switch (auto type = doc["type"].as<bridge_message_type_t>())
     {
         case bridge_message_type_t::streams:
             return doc.as<streams_message_t>();
@@ -151,11 +137,11 @@ std::span<uint8_t> serialize_bridge_message(const T& message)
     
     if (!sz)
     {
-        ESP_LOGE(protocol::SERIALIZE_TAG, "%s", "serialization failed");
+        ESP_LOGE(protocol::TAG, "%s", "serialization failed");
         return {writer.data(), 0};
     }
 
-    ESP_LOGD(protocol::SERIALIZE_TAG, "serialized to sz=%d", sz);
+    ESP_LOGD(protocol::TAG, "serialized to sz=%d", sz);
 
     return {writer.data(), sz};
 }

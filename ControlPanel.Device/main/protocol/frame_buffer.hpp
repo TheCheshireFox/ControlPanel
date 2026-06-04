@@ -1,6 +1,5 @@
 #pragma once
 
-#include <array>
 #include <span>
 
 namespace transport
@@ -12,7 +11,7 @@ namespace transport
         {
             if (data.size() > _buffer.size() - _w_pos)
                 return false;
-            
+
             std::memcpy(&_buffer[_w_pos], data.data(), data.size());
             _w_pos += data.size();
 
@@ -60,6 +59,35 @@ namespace transport
         std::span<uint8_t> span()
         {
             return std::span<uint8_t>{_buffer.data() + _r_pos, size()};
+        }
+
+        std::span<uint8_t> find(std::span<const uint8_t> seq)
+        {
+            auto frame_span = span();
+
+            auto pos = find_sequence(frame_span, seq);
+            if (pos == -1)
+                return {};
+
+            return frame_span.subspan(pos);
+        }
+
+    private:
+        static std::ptrdiff_t find_sequence(std::span<const uint8_t> span, std::span<const uint8_t> seq)
+        {
+            if (span.size() < seq.size())
+                return -1;
+
+            for (auto i = 0; i <= span.size() - seq.size(); i++)
+            {
+                if (span[i] != seq[0])
+                    continue;
+
+                if (std::memcmp(&span[i], seq.data(), seq.size()) == 0)
+                    return i;
+            }
+
+            return -1;
         }
 
     private:

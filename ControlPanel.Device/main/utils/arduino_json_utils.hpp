@@ -36,6 +36,24 @@ namespace ArduinoJson
         }
     };
 
+    template<typename T>
+    struct Converter<std::vector<T>>
+    {
+        static std::vector<T> fromJson(JsonVariantConst src)
+        {
+            auto array = src.as<JsonArrayConst>();
+            std::vector<T> result;
+            result.reserve(array.size());
+
+            for (const auto& value: array)
+            {
+                result.emplace_back(value.as<T>());
+            }
+
+            return result;
+        }
+    };
+
     template<>
     struct Converter<std::span<const uint8_t>>
     {
@@ -45,18 +63,6 @@ namespace ArduinoJson
             return std::span{static_cast<const uint8_t*>(bin.data()), bin.size()};
         }
     };
-}
-
-template<typename T>
-void convertFromJson(JsonVariantConst src, std::vector<T>& dst)
-{
-    auto array = src.as<JsonArrayConst>();
-    dst.reserve(array.size());
-
-    for (const auto& v: array)
-    {
-        dst.emplace_back(v.as<T>());
-    }
 }
 
 class dynamic_writer_t

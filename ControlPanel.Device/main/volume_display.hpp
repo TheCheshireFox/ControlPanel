@@ -29,8 +29,6 @@ concept Iterable = std::ranges::input_range<R> && std::convertible_to<std::range
 
 class volume_display_t
 {
-    static constexpr const char* TAG = "DISPLAY";
-
     struct vl_list_item_t
     {
         lv_obj_t* item;
@@ -39,6 +37,8 @@ class volume_display_t
     };
 
 public:
+    static constexpr auto TAG = "DISPLAY";
+
     volume_display_t(int32_t x, int32_t y, int32_t w, int32_t h)
         : _content(create_content(x, y, w, h))
         , _volume_list(_content, app_style::list, app_style::list_item, x, y, w, h)
@@ -48,38 +48,47 @@ public:
 
     void refresh(Iterable<bridge_audio_stream_t> auto&& updated, Iterable<bridge_audio_stream_id_t> auto&& deleted)
     {
-        std::scoped_lock lock{lv_sync};
-
-        remove_outdated(deleted);
-
-        for (const auto& stream: updated)
+        std::vector<std::tuple<std::string, std::string>> missing_icons;
         {
-            event_id id{stream.id.id, stream.id.agent_id};
+            std::scoped_lock lock{lv_sync};
 
-            auto it = _volume_list_items.find(id);
-            if (it == _volume_list_items.end())
+            remove_outdated(deleted);
+
+            for (const auto& stream: updated)
             {
-                ESP_LOGD(TAG, "add (%s, %s) name_sz=%d", id.id.c_str(), id.agent_id.c_str(), stream.name ? stream.name->sprite.size() : 0);
-                if (stream.name && stream.volume && stream.mute)
+                event_id id{stream.id.id, stream.id.agent_id};
+
+                auto it = _volume_list_items.find(id);
+                if (it == _volume_list_items.end())
                 {
-                    add_item(id, stream.source, *stream.name, *stream.volume, *stream.mute);
-                }
-                else
-                {
-                    ESP_LOGE(TAG, "new stream missing information");
+                    ESP_LOGD(TAG, "add (%s, %s) %s", id.id.c_str(), id.agent_id.c_str(), stream.name.value_or({}).c_str());
+                    if (stream.name && stream.volume && stream.mute)
+                    {
+                        add_item(id, stream.source, *stream.name, *stream.volume, *stream.mute, missing_icons);
+                    }
+                    else
+                    {
+                        ESP_LOGE(TAG, "new stream missing information");
+                    }
+
+                    continue;
                 }
 
-                continue;
+                auto& list_item = it->second.list_item;
+
+                ESP_LOGD(TAG, "update (%s, %s)", id.id.c_str(), id.agent_id.c_str());
+
+                if (stream.name) list_item->set_title(*stream.name);
+                if (stream.mute) list_item->set_mute(*stream.mute);
+                if (stream.volume) list_item->set_volume(static_cast<int32_t>(*stream.volume * 100));
             }
-
-            auto& list_item = it->second.list_item;
-
-            ESP_LOGD(TAG, "update (%s, %s)", id.id.c_str(), id.agent_id.c_str());
-
-            if (stream.name) list_item->set_title(LV_COLOR_FORMAT_A8, stream.name->width, stream.name->height, stream.name->sprite);
-            if (stream.mute) list_item->set_mute(*stream.mute);
-            if (stream.volume) list_item->set_volume((int32_t)(*stream.volume * 100));
         }
+
+        if (!_on_icon_missing)
+            return;
+
+        for (const auto& [source, agent]: missing_icons)
+            _on_icon_missing(source, agent);
     }
 
     void update_icon(const std::string& source, const std::string& agent_id, uint32_t w, uint32_t h, std::span<const uint8_t> rgb565a8)
@@ -160,14 +169,11 @@ private:
             
             _volume_list_items.erase(it);
             if (!_volume_list.delete_item(item))
-            {
                 ESP_LOGW(TAG, "list item not deleted (%s, %s)", id.id.c_str(), id.agent_id.c_str());
-                continue;
-            }
         }
     }
 
-    void add_item(const event_id& id, const std::string& source, const name_sprite_t& title, float volume, bool mute)
+    void add_item(const event_id& id, const std::string& source, const std::string& title, float volume, bool mute, std::vector<std::tuple<std::string, std::string>>& missing_icons)
     {
         auto item = _volume_list.add_item();
         auto [it, inserted] = _volume_list_items.emplace(id, vl_list_item_t{ item, std::make_unique<list_item_t>(item), source });
@@ -179,14 +185,13 @@ private:
         
         auto& list_item = it->second.list_item;
 
-        list_item->set_title(LV_COLOR_FORMAT_A8, title.width, title.height, title.sprite);
+        list_item->set_title(title);
         list_item->set_volume(static_cast<int8_t>(volume * 100));
         list_item->set_mute(mute);
         list_item->on_mute_changed([id, this](bool mute) { mute_change(id, mute); });
         list_item->on_volume_changed([id, this](int8_t volume) { volume_change(id, volume); });
 
-        if (_on_icon_missing)
-            _on_icon_missing(source, id.agent_id);
+        missing_icons.emplace_back(std::make_tuple(source, id.agent_id));
     }
 
     static lv_obj_t* create_content(int32_t x, int32_t y, int32_t w, int32_t h)

@@ -2,6 +2,8 @@
 
 #include "lvgl.h"
 
+extern lv_font_t noto_sans_eu;
+
 consteval lv_color_t color_hex(uint32_t c)
 {
     lv_color_t ret;
@@ -28,14 +30,16 @@ private:
 
     static lv_style_t* init_title_style()
     {
+        auto height = std::max(noto_sans_eu.line_height, noto_sans_eu.fallback->line_height);
+
         static lv_style_t s;
         lv_style_init(&s);
-        lv_style_set_height(&s, 18);
+        lv_style_set_height(&s, height);
         lv_style_set_pad_all(&s, 0);
         lv_style_set_margin_bottom(&s, 0);
-        lv_style_set_recolor(&s, primary_fg);
-        lv_style_set_recolor_opa(&s, LV_OPA_COVER);
-        lv_style_set_align(&s, LV_ALIGN_LEFT_MID);
+        lv_style_set_text_color(&s, primary_fg);
+        lv_style_set_text_align(&s, LV_TEXT_ALIGN_LEFT);
+        lv_style_set_text_font(&s, &noto_sans_eu);
         return &s;
     }
 
@@ -55,6 +59,7 @@ private:
         lv_style_set_text_align(&s, LV_TEXT_ALIGN_RIGHT);
         lv_style_set_pad_all(&s, 0);
         lv_style_set_min_width(&s, 34);
+        lv_style_set_text_font(&s, &lv_font_montserrat_14);
         return &s;
     }
 
@@ -62,7 +67,6 @@ private:
     {
         static lv_style_t s;
         lv_style_init(&s);
-
         without_borders(&s);
         lv_style_set_pad_row(&s, 8);
         lv_style_set_pad_column(&s, 0);
@@ -73,7 +77,6 @@ private:
     {
         static lv_style_t s;
         lv_style_init(&s);
-
         without_borders(&s);
         lv_style_set_pad_row(&s, 0);
         lv_style_set_pad_column(&s, 4);
@@ -109,7 +112,7 @@ private:
 
 public:
     inline static const lv_style_t* content;
-    inline static const lv_style_t* title;
+    inline static const lv_style_t* title_label;
     inline static const lv_style_t* slider;
     inline static const lv_style_t* slider_label;
     inline static const lv_style_t* list;
@@ -122,7 +125,7 @@ public:
         std::scoped_lock lock{lv_sync};
 
         content = init_content_style();
-        title = init_title_style();
+        title_label = init_title_style();
         slider = init_slider_style();
         slider_label = init_slider_label();
         list = init_list_style();
@@ -130,7 +133,7 @@ public:
         app_icon_img = init_app_icon_img();
         mute_click_area = init_mute_click_area();
 
-        auto theme = lv_theme_default_init(disp, primary_fg, primary_bg, true, LV_FONT_DEFAULT);
+        auto theme = lv_theme_default_init(disp, primary_fg, primary_bg, true, &lv_font_montserrat_14);
         lv_disp_set_theme(disp, theme);
     }
 };

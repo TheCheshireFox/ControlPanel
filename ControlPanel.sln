@@ -2,7 +2,7 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ControlPanel.Agent", "ControlPanel.Agent\ControlPanel.Agent.csproj", "{AB3BF197-0521-4EB4-A7FE-AA1179805734}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ControlPanel.Protocol", "ControlPanel.Protocol\ControlPanel.Protocol.csproj", "{0685EAC3-8FDF-4462-A6DE-415D27984CCC}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ControlPanel.AgentProtocol", "ControlPanel.AgentProtocol\ControlPanel.AgentProtocol.csproj", "{0685EAC3-8FDF-4462-A6DE-415D27984CCC}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ControlPanel.Shared", "ControlPanel.Shared\ControlPanel.Shared.csproj", "{03BFFFC5-AF8A-4771-BE24-8F8AF342F33F}"
 EndProject
@@ -20,7 +20,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ControlPanel.Agent.Windows"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ControlPanel.Bridge.UnitTests", "ControlPanel.Bridge.UnitTests\ControlPanel.Bridge.UnitTests.csproj", "{742EAEB7-4D30-4DA1-8AC6-1E289D432613}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ControlPanel.BtRfcomm", "ControlPanel.BtRfcomm\ControlPanel.BtRfcomm.csproj", "{621C6D75-E80D-4D6A-9765-78A4F2A2B98E}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ControlPanel.Agent.Messaging", "ControlPanel.Agent.Messaging\ControlPanel.Agent.Messaging.csproj", "{30FA9801-9C0F-4153-9633-BB84367E6488}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -83,17 +83,18 @@ Global
 		{742EAEB7-4D30-4DA1-8AC6-1E289D432613}.Release|Any CPU.Build.0 = Release|Any CPU
 		{742EAEB7-4D30-4DA1-8AC6-1E289D432613}.Release|x64.ActiveCfg = Release|Any CPU
 		{742EAEB7-4D30-4DA1-8AC6-1E289D432613}.Release|x64.Build.0 = Release|Any CPU
-		{621C6D75-E80D-4D6A-9765-78A4F2A2B98E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{621C6D75-E80D-4D6A-9765-78A4F2A2B98E}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{621C6D75-E80D-4D6A-9765-78A4F2A2B98E}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{621C6D75-E80D-4D6A-9765-78A4F2A2B98E}.Release|Any CPU.Build.0 = Release|Any CPU
-		{621C6D75-E80D-4D6A-9765-78A4F2A2B98E}.Release|x64.ActiveCfg = Release|Any CPU
-		{621C6D75-E80D-4D6A-9765-78A4F2A2B98E}.Release|x64.Build.0 = Release|Any CPU
+		{30FA9801-9C0F-4153-9633-BB84367E6488}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{30FA9801-9C0F-4153-9633-BB84367E6488}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{30FA9801-9C0F-4153-9633-BB84367E6488}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{30FA9801-9C0F-4153-9633-BB84367E6488}.Release|Any CPU.Build.0 = Release|Any CPU
+		{30FA9801-9C0F-4153-9633-BB84367E6488}.Release|x64.ActiveCfg = Release|Any CPU
+		{30FA9801-9C0F-4153-9633-BB84367E6488}.Release|x64.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{AB3BF197-0521-4EB4-A7FE-AA1179805734} = {10F766EB-5535-4CDD-B301-0292AC5A4A20}
 		{48DE8E67-3CC4-4C41-BB46-F3EE40838E39} = {10F766EB-5535-4CDD-B301-0292AC5A4A20}
 		{1AC096C1-87E6-4378-856B-38701F64AA61} = {10F766EB-5535-4CDD-B301-0292AC5A4A20}
 		{8E3BA9FE-9698-4B02-B488-CE43871CD8FD} = {10F766EB-5535-4CDD-B301-0292AC5A4A20}
+		{30FA9801-9C0F-4153-9633-BB84367E6488} = {10F766EB-5535-4CDD-B301-0292AC5A4A20}
 	EndGlobalSection
 EndGlobal

@@ -1,128 +1,136 @@
-using System.Threading.Channels;
-using ControlPanel.Bridge.Extensions;
 using ControlPanel.Bridge.Framer;
 using ControlPanel.Bridge.Options;
-using ControlPanel.Shared;
 using Microsoft.Extensions.Options;
+using Nito.AsyncEx;
 
 namespace ControlPanel.Bridge.Transport;
 
-public sealed class FrameTransport : IFrameTransport, IAsyncDisposable
+internal sealed class TransportStreamHolder(
+    ITransportStreamProvider streamProvider,
+    TimeSpan reconnectInterval,
+    ILogger logger) : IAsyncDisposable
 {
-    private readonly ITransportStreamProvider _streamProvider;
-    private readonly TimeSpan _reconnectInterval;
-    private readonly ILogger<FrameTransport> _logger;
-    private readonly CancellableTask _connectionLoop;
+    private readonly AsyncLock _connectionLock = new();
+    private readonly CancellationTokenSource _cts = new();
+    private Task _reconnectingTask = Task.CompletedTask;
+    private TransportStream? _stream;
 
-    private readonly BlockingQueue<MemoryRentBlock> _fromStream = new();
-    private readonly Channel<MemoryRentBlock> _toStream = Channel.CreateUnbounded<MemoryRentBlock>(new UnboundedChannelOptions{ SingleReader = true });
-    
-    public event Func<CancellationToken, Task>? OnReconnectedAsync;
-    
-    public FrameTransport(IOptions<TransportOptions> options, ITransportStreamProvider streamProvider, ILogger<FrameTransport> logger)
+    public async Task<TransportStream> GetStreamAsync(CancellationToken cancellationToken)
     {
-        _streamProvider = streamProvider;
-        _logger = logger;
-        _reconnectInterval = options.Value.ReconnectInterval;
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
         
-        _connectionLoop = new CancellableTask(ConnectionLoopAsync);
-    }
-
-    public async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken)
-    {
-        var count = 0;
-        
-        await _fromStream.TakeOrReplaceAsync(block =>
+        using (await _connectionLock.LockAsync(cts.Token))
         {
-            count = Math.Min(buffer.Length, block.Data.Length);
-            block.Data[..count].CopyTo(buffer);
+            if (_stream != null)
+                return _stream;
 
-            if (count > buffer.Length)
-                return block with { Data = block.Data[count..] };
-            
-            block.Dispose();
-            return null;
+            if (_reconnectingTask.IsCompleted)
+                _reconnectingTask = ReconnectInternalAsync(cts.Token);
 
-        }, cancellationToken);
+            await _reconnectingTask;
 
-        return count;
+            return _stream ?? throw new InvalidOperationException("Stream not available");
+        }
     }
 
-    public async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken)
+    public void SetDisconnected(CancellationToken cancellationToken)
     {
-        var block = new MemoryRentBlock(buffer.Length);
-        using var disposables = new Disposables(block);
-
-        buffer.CopyTo(block.Data);
-        await _toStream.Writer.WriteAsync(block, cancellationToken);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
         
-        disposables.Detach();
+        using (_connectionLock.Lock(cts.Token))
+        {
+            _stream?.Dispose();
+            _stream = null;
+        }
     }
-    
-    private async Task ConnectionLoopAsync(CancellationToken cancellationToken)
+
+    private async Task ReconnectInternalAsync(CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                using var transportStream = await _streamProvider.OpenStreamAsync(cancellationToken);
-                var stream = transportStream.Stream;
+                logger.LogInformation("Opening stream...");
 
-                await OnReconnectedAsync.InvokeAllAsync(cancellationToken);
+                _stream = await streamProvider.OpenStreamAsync(cancellationToken);
+
+                logger.LogInformation("Stream opened.");
                 
-                _logger.LogInformation("Stream opened.");
-
-                var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                Task[] tasks =
-                [
-                    Task.Run(async () => await ReadAsync(stream, cts.Token), cts.Token),
-                    Task.Run(async () => await WriteAsync(stream, cts.Token), cts.Token),
-                ];
-
-                await Task.WhenAny(tasks);
-                await cts.CancelAsync();
-                await Task.WhenAll(tasks); // will throw
+                return;
             }
             catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
             {
-                _logger.LogWarning(ex, "Stream error.");
-            }
-
-            await Task.Delay(_reconnectInterval, cancellationToken);
-        }
-    }
-
-    private async Task ReadAsync(Stream stream, CancellationToken cancellationToken)
-    {
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            var block = new MemoryRentBlock(2048);
-            using var disposables = new Disposables(block);
-
-            var read = await stream.ReadAsync(block.Data, cancellationToken);
-            if (read <= 0)
-                return;
-
-            await _fromStream.EnqueueAsync(block with { Data = block.Data[..read] }, cancellationToken);
-            
-            disposables.Detach();
-        }
-    }
-
-    private async Task WriteAsync(Stream stream, CancellationToken cancellationToken)
-    {
-        await foreach (var block in _toStream.Reader.ReadAllAsync(cancellationToken))
-        {
-            using (block)
-            {
-                await stream.WriteAsync(block.Data, cancellationToken);
-                await stream.FlushAsync(cancellationToken);
+                logger.LogWarning(ex, "Stream error.");
+                await Task.Delay(reconnectInterval, cancellationToken);
             }
         }
     }
 
     public async ValueTask DisposeAsync()
     {
-        await _connectionLoop.DisposeAsync();
+        if (_cts.IsCancellationRequested)
+            return;
+        
+        await _cts.CancelAsync();
+        await _reconnectingTask.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        
+        if (_stream != null)
+            await _stream.DisposeAsync().AsTask().ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+    }
+}
+
+public sealed class FrameTransport(
+    IOptions<TransportOptions> options,
+    ITransportStreamProvider streamProvider,
+    ILogger<FrameTransport> logger)
+    : IFrameTransport, IAsyncDisposable
+{
+    private readonly AsyncLock _readLock = new();
+    private readonly AsyncLock _writeLock = new();
+    private readonly TransportStreamHolder _streamHolder = new(streamProvider, options.Value.ReconnectInterval, logger);
+
+    public async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+    {
+        return await DoStreamAsync(async s =>
+        {
+            using (await _readLock.LockAsync(cancellationToken))
+                return await s.ReadAsync(buffer, cancellationToken);
+        }, cancellationToken);
+    }
+
+    public async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken)
+    {
+        await DoStreamAsync(async s =>
+        {
+            using (await _writeLock.LockAsync(cancellationToken))
+                await s.WriteAsync(buffer, cancellationToken);
+        }, cancellationToken);
+    }
+
+    private async ValueTask<T> DoStreamAsync<T>(Func<Stream, ValueTask<T>> action, CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                var stream = await _streamHolder.GetStreamAsync(cancellationToken);
+                return await action(stream);
+            }
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                logger.LogWarning(ex, "Stream error.");
+                _streamHolder.SetDisconnected(cancellationToken);
+            }
+        }
+        
+        throw new OperationCanceledException();
+    }
+
+    private async ValueTask DoStreamAsync(Func<Stream, ValueTask> action, CancellationToken cancellationToken) =>
+        await DoStreamAsync(async s => { await action(s); return 0; }, cancellationToken);
+
+    public async ValueTask DisposeAsync()
+    {
+        await _streamHolder.DisposeAsync();
     }
 }

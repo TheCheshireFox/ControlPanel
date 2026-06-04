@@ -42,7 +42,7 @@ internal class IconLocator : IIconLocator
                 }
                 catch (Exception e)
                 {
-                    _logger.LogError(e, "Could not load icon {exePath}", exePath);
+                    _logger.LogError(e, "Could not load icon {exePath}", path);
                     return AudioStreamIcon.Default;
                 }
             });

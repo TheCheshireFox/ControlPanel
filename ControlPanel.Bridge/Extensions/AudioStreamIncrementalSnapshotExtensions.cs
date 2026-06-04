@@ -1,27 +1,18 @@
-using ControlPanel.Bridge.Protocol;
+using ControlPanel.Bridge.Device.DeviceProtocol;
 
 namespace ControlPanel.Bridge.Extensions;
 
 public static class AudioStreamIncrementalSnapshotExtensions
 {
-    public static (AudioStream[] Updated, Protocol.AudioStreamId[] Deleted) ToUartAudioStreams(this AudioStreamIncrementalSnapshot snapshot, ITextRenderer textRenderer)
+    public static (AudioStream[] Updated, Device.DeviceProtocol.AudioStreamId[] Deleted) ToDeviceAudioStreams(this AudioStreamIncrementalSnapshot snapshot)
     {
         var uartUpdated = snapshot.Updated
             .OrderBy(x => x.Name, StringComparer.InvariantCultureIgnoreCase)
-            .Select(x => new AudioStream(new Protocol.AudioStreamId(x.Id.Id, x.Id.AgentId), x.Source, CreateTextSprite(x.Name, textRenderer), x.Mute, x.Volume))
+            .Select(x => new AudioStream(new Device.DeviceProtocol.AudioStreamId(x.Id.Id, x.Id.AgentId), x.Source, x.Name, x.Mute, x.Volume, 0)) // TODO: calc icon hash
             .ToArray();
 
-        var uartDeleted = snapshot.Deleted.Select(x => new Protocol.AudioStreamId(x.Id.Id, x.Id.AgentId)).ToArray();
+        var uartDeleted = snapshot.Deleted.Select(x => new Device.DeviceProtocol.AudioStreamId(x.Id.Id, x.Id.AgentId)).ToArray();
         
         return (uartUpdated, uartDeleted);
-    }
-    
-    private static AudioStreamNameSprite? CreateTextSprite(string? text, ITextRenderer textRenderer)
-    {
-        if (text == null)
-            return null;
-        
-        var sprite = textRenderer.Render(text);
-        return new AudioStreamNameSprite(text, sprite.Image, sprite.Width, sprite.Height);
     }
 }

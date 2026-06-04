@@ -30,7 +30,7 @@ public record AudioStreamId(string Id, string AgentId);
 
 public record AudioStreamInfo(AudioStreamId Id, string Source, string Name, bool Mute, double Volume)
 {
-    public static AudioStreamInfo FromStream(AudioStreamId streamId, BridgeAudioStream stream)
+    public static AudioStreamInfo FromStream(AudioStreamId streamId, AgentAudioStream stream)
         => new(
             streamId,
             stream.Source,
@@ -54,7 +54,7 @@ public interface IAudioStreamRepository
 {
     event Func<AudioStreamIncrementalSnapshot, CancellationToken, Task> OnSnapshotChangedAsync;
     
-    Task UpdateAsync(string agentId, IEnumerable<BridgeAudioStream> streams, CancellationToken cancellationToken);
+    Task UpdateAsync(string agentId, IEnumerable<AgentAudioStream> streams, CancellationToken cancellationToken);
     Task ClearAsync(string agentId, CancellationToken cancellationToken);
     Task<AudioStreamInfo[]> GetAllAsync(CancellationToken cancellationToken);
 }
@@ -76,7 +76,7 @@ public class AudioStreamRepository : IAudioStreamRepository
 
     public event Func<AudioStreamIncrementalSnapshot, CancellationToken, Task>? OnSnapshotChangedAsync;
 
-    public async Task UpdateAsync(string agentId, IEnumerable<BridgeAudioStream> streams, CancellationToken cancellationToken)
+    public async Task UpdateAsync(string agentId, IEnumerable<AgentAudioStream> streams, CancellationToken cancellationToken)
     {
         var diff = new List<AudioStreamDiff>();
         var removed = new List<AudioStreamInfo>();
@@ -148,7 +148,7 @@ public class AudioStreamRepository : IAudioStreamRepository
         }
     }
 
-    private static List<AudioStreamDiff> UpdateAgentStreams(string agentId, Dictionary<string, AudioStreamInfo> agentStreams, Dictionary<string, BridgeAudioStream> bridgeAudioStreams)
+    private static List<AudioStreamDiff> UpdateAgentStreams(string agentId, Dictionary<string, AudioStreamInfo> agentStreams, Dictionary<string, AgentAudioStream> bridgeAudioStreams)
     {
         var diffs = new List<AudioStreamDiff>();
         
@@ -176,7 +176,7 @@ public class AudioStreamRepository : IAudioStreamRepository
         return diffs;
     }
 
-    private static bool TryGetAudioStreamDiff(AudioStreamInfo info, BridgeAudioStream stream, out AudioStreamDiff diff, out AudioStreamInfo updatedInfo)
+    private static bool TryGetAudioStreamDiff(AudioStreamInfo info, AgentAudioStream stream, out AudioStreamDiff diff, out AudioStreamInfo updatedInfo)
     {
         updatedInfo = null!;
 
@@ -200,7 +200,7 @@ public class AudioStreamRepository : IAudioStreamRepository
         return true;
     }
     
-    private static List<AudioStreamInfo> RemoveAgentStreams(Dictionary<string,AudioStreamInfo> currentAgentStreams, Dictionary<string, BridgeAudioStream> bridgeAudioStreams)
+    private static List<AudioStreamInfo> RemoveAgentStreams(Dictionary<string,AudioStreamInfo> currentAgentStreams, Dictionary<string, AgentAudioStream> bridgeAudioStreams)
     {
         var removed = new List<AudioStreamInfo>();
         var removedIds = currentAgentStreams.Keys.Where(x => !bridgeAudioStreams.ContainsKey(x));

@@ -14,14 +14,14 @@
 
 #include "lvgl.h"
 
-enum class orientation_t {
+enum class orientation_t  : uint8_t{
     portrait,
     landscape,
 };
 
 class waveshare_st7789_t
 {
-    static constexpr const char *TAG = "ST7789";
+    static constexpr auto TAG = "ST7789";
 
 public:
     waveshare_st7789_t(spi_host_device_t spi_host, gpio_num_t cs, gpio_num_t dc, gpio_num_t rst, gpio_num_t bl,
@@ -55,9 +55,8 @@ public:
     {
         std::unique_lock lock{_sync};
 
-        if (_bl >= 0) {
-            gpio_set_level(_bl, enable);
-        }
+        if (_bl >= 0)
+            ESP_ERROR_CHECK_WITHOUT_ABORT(gpio_set_level(_bl, enable));
     }
 
     void draw(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, const uint8_t* buffer, uint32_t size)
@@ -118,7 +117,7 @@ private:
             .clock_source = SPI_CLK_SRC_DEFAULT,
             .clock_speed_hz = _spi_clock_hz,
             .spics_io_num = _cs,
-            .flags = 0,
+            .flags = SPI_DEVICE_NO_DUMMY,
             .queue_size = 4
         };
 
@@ -131,12 +130,12 @@ private:
             return;
         }
 
-        delay_ms(20);
+        delay_ms(50);
 
         gpio_set_level(_rst, 0);
-        delay_ms(20);
+        delay_ms(50);
         gpio_set_level(_rst, 1);
-        delay_ms(20);
+        delay_ms(50);
     }
 
     void write_cmd(uint8_t cmd)
@@ -144,9 +143,9 @@ private:
         set_dc(false);
 
         spi_transaction_t t = {};
-        t.length   = 8;
+        t.length = 8;
         t.tx_buffer = &cmd;
-        spi_device_transmit(_spi_dev, &t);
+        ESP_ERROR_CHECK_WITHOUT_ABORT(spi_device_transmit(_spi_dev, &t));
     }
 
     void write_data(const uint8_t *data, size_t len)
@@ -154,9 +153,9 @@ private:
         set_dc(true);
 
         spi_transaction_t t = {};
-        t.length   = len * 8;
+        t.length = len * 8;
         t.tx_buffer = data;
-        spi_device_transmit(_spi_dev, &t);
+        ESP_ERROR_CHECK_WITHOUT_ABORT(spi_device_transmit(_spi_dev, &t));
     }
 
     template<typename... Ts>
@@ -172,8 +171,7 @@ private:
         write_data(buf, sizeof...(Ts));
     }
 
-    void set_window(uint16_t x0, uint16_t y0,
-                           uint16_t x1, uint16_t y1)
+    void set_window(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
     {
         write_cmd(0x2A);
         write_data_bytes(x0 >> 8, x0 & 0xFF, x1 >> 8, x1 & 0xFF);
@@ -240,7 +238,7 @@ private:
 
         // Negative voltage gamma
         write_cmd(0xE1);
-        write_data_bytes(0xF0, 0x04, 0x08, 0x08, 0x07, 0x03, 0x28, 0x32, 0x40, 0x3B, 0x19, 0x18, 0x2A, 0x2E );
+        write_data_bytes(0xF0, 0x04, 0x08, 0x08, 0x07, 0x03, 0x28, 0x32, 0x40, 0x3B, 0x19, 0x18, 0x2A, 0x2E);
 
         // Display inversion ON
         write_cmd(0x21);
@@ -254,7 +252,7 @@ private:
     void set_dc(bool data)
     {
         if (_dc >= 0)
-            gpio_set_level(_dc, data ? 1 : 0);
+            ESP_ERROR_CHECK_WITHOUT_ABORT(gpio_set_level(_dc, data ? 1 : 0));
     }
 
 private:
@@ -268,5 +266,5 @@ private:
     const uint32_t       _height;
     const int            _spi_clock_hz;
     const orientation_t  _orientation;
-    std::recursive_mutex _sync;
+    std::recursive_mutex _sync{};
 };

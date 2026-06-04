@@ -29,7 +29,7 @@ class cst328_driver_t {
     static constexpr uint16_t CST328_REG_CONFIG = 0x8047;
 
 public:
-    cst328_driver_t(i2c_port_t port, uint32_t clock, gpio_num_t sda, gpio_num_t scl, gpio_num_t interrupt = gpio_num_t::GPIO_NUM_NC)
+    cst328_driver_t(i2c_port_t port, uint32_t clock, gpio_num_t sda, gpio_num_t scl, gpio_num_t interrupt = GPIO_NUM_NC)
         : _interrupt(interrupt != -1)
     {
         if (interrupt != -1)
@@ -37,7 +37,7 @@ public:
             gpio_config_t int_conf = {};
             int_conf.intr_type    = GPIO_INTR_NEGEDGE;
             int_conf.mode         = GPIO_MODE_INPUT;
-            int_conf.pin_bit_mask = (1ULL << interrupt);
+            int_conf.pin_bit_mask = 1ULL << interrupt;
             int_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
             int_conf.pull_up_en   = GPIO_PULLUP_ENABLE;
             ESP_ERROR_CHECK(gpio_config(&int_conf));
@@ -69,7 +69,7 @@ public:
         {
             xTaskCreate(THIS_CALLBACK(this, touch_task), "touch_task", 4096, this, 5, &_touch_task_handle);
             configASSERT(_touch_task_handle);
-            ESP_ERROR_CHECK(gpio_isr_handler_add(interrupt, touch_int_isr, static_cast<void*>(&_touch_task_handle)));
+            ESP_ERROR_CHECK(gpio_isr_handler_add(interrupt, touch_int_isr, &_touch_task_handle));
         }
     }
 
@@ -171,7 +171,8 @@ private:
                 _last_point = pt;
             }
 
-            if (_on_touch) _on_touch(pt);
+            if (_on_touch)
+                _on_touch(pt);
         }
     }
 
@@ -207,9 +208,8 @@ private:
 
     esp_err_t cst328_read_xy_single(touch_point_t& pt)
     {
-        uint8_t buf[3] = {0};
-        auto err = cst328_reg_read(CST328_REG_XY + 1, buf, sizeof(buf));
-        if (err != ESP_OK) {
+        uint8_t buf[3] = {};
+        if (auto err = cst328_reg_read(CST328_REG_XY + 1, buf, sizeof(buf)); err != ESP_OK) {
             return err;
         }
 

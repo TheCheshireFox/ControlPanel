@@ -8,7 +8,14 @@ using Svg.Skia;
 
 namespace ControlPanel.Bridge;
 
-public class AgentAppIconProvider
+public interface IAgentAppIconProvider
+{
+    int IconSize { get; }
+    void SetAgentIcon(byte[] iconRaw);
+    Image<Rgba32> GetAgentAppIcon(byte[] raw);
+}
+
+public class AgentAppIconProvider : IAgentAppIconProvider
 {
     private readonly int _targetAgentIconSize;
     private readonly Image<Rgba32> _emptyIcon;

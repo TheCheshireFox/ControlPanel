@@ -60,15 +60,13 @@ internal sealed class WindowsAudioAgent : IAudioAgent, IDisposable
     public async Task SetVolumeAsync(string id, double volume, CancellationToken cancellationToken)
     {
         var session = await FindSessionAsync(id, cancellationToken);
-        if (session != null)
-            session.Volume = (float)Math.Clamp(volume, 0.0, 1.0);
+        session?.Volume = (float)Math.Clamp(volume, 0.0, 1.0);
     }
 
     public async Task ToggleMuteAsync(string id, bool mute, CancellationToken cancellationToken)
     {
         var session = await FindSessionAsync(id, cancellationToken);
-        if (session != null)
-            session.Mute = mute;
+        session?.Mute = mute;
     }
 
     public Task<AudioStreamIcon> GetAudioStreamIconAsync(string source, CancellationToken cancellationToken)
@@ -99,8 +97,7 @@ internal sealed class WindowsAudioAgent : IAudioAgent, IDisposable
         if (sessionId == null)
             return null;
 
-        var session = _audioSessionProvider.Sessions
-            .FirstOrDefault(x => string.Equals(x.Id, sessionId, StringComparison.Ordinal));
+        var session = _audioSessionProvider.Sessions.FirstOrDefault(x => string.Equals(x.Id, sessionId, StringComparison.Ordinal));
         if (session != null)
             return session;
         

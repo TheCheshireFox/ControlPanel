@@ -1,134 +1,82 @@
-using ControlPanel.Agent.Extensions;
+using ControlPanel.Agent.Messaging;
 using ControlPanel.Agent.Options;
 using ControlPanel.Agent.Shared;
 using ControlPanel.Protocol;
+using ControlPanel.Shared;
+using ControlPanel.Shared.Messaging;
 using ControlPanel.WebSocket;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace ControlPanel.Agent;
 
-public class AgentService : BackgroundService
+public class AgentService(
+    IServiceProvider serviceProvider,
+    IOptions<AgentServiceOptions> options,
+    IAudioAgent audioAgent,
+    IWebSocketFactory webSocketFactory,
+    ILogger<AgentService> logger)
+    : BackgroundService
 {
-    private readonly Uri _bridgeUri;
-    private readonly IAudioAgent _audioAgent;
-    private readonly IWebSocketFactory _webSocketFactory;
-    private readonly ILogger<AgentService> _logger;
-    private readonly TimeSpan _snapshotInterval = TimeSpan.FromSeconds(1);
+    private readonly Uri _bridgeUri = new($"ws://{options.Value.Address}/agents/{options.Value.AgentId}/ws");
     private readonly TimeSpan _reconnectDelay = TimeSpan.FromSeconds(3);
 
-    public AgentService(IOptions<AgentServiceOptions> options, IAudioAgent audioAgent, IWebSocketFactory webSocketFactory, ILogger<AgentService> logger)
-    {
-        _bridgeUri = new Uri($"ws://{options.Value.Address}/agents/{options.Value.AgentId}/ws");
-        _audioAgent = audioAgent;
-        _logger = logger;
-        _webSocketFactory = webSocketFactory;
-    }
-    
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            using var ws = _webSocketFactory.Create();
+            using var ws = webSocketFactory.Create();
 
             try
             {
-                _logger.LogInformation("connecting to {Uri}", _bridgeUri);
+                logger.LogInformation("connecting to {Uri}", _bridgeUri);
                 await ws.ConnectAsync(_bridgeUri, stoppingToken);
-                _logger.LogInformation("connected");
+                logger.LogInformation("connected");
 
                 using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
 
+                await using var scope = serviceProvider.CreateAsyncScope();
+                scope.ServiceProvider.SetScopedProxy(ws);
+                
+                var messageService = scope.ServiceProvider.GetRequiredService<IMessageService<AgentMessage>>();
+                var snapshotService = scope.ServiceProvider.GetRequiredService<IAudioStreamSnapshotService>();
+
                 await SendAgentInitMessageAsync(ws, linkedCts.Token);
-                
-                var sendTask = SendSnapshotsLoopAsync(ws, linkedCts.Token);
-                var recvTask = ReceiveCommandsLoopAsync(ws, linkedCts.Token);
-                
-                await Task.WhenAny(sendTask, recvTask);
-                await linkedCts.CancelAsync();
+                await RunTasksAsync([
+                    messageService.RunAsync(linkedCts.Token),
+                    snapshotService.RunAsync(linkedCts.Token)
+                ], linkedCts);
 
-                await Task.WhenAll(sendTask, recvTask);
-
-                _logger.LogInformation("connection ended");
+                logger.LogInformation("connection ended");
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
             {
-                // shutting down
-                break;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "connection error");
+                logger.LogError(ex, "connection error");
             }
 
             if (stoppingToken.IsCancellationRequested)
                 break;
             
-            _logger.LogInformation("reconnecting in {Delay}...", _reconnectDelay);
-            try
-            {
-                await Task.Delay(_reconnectDelay, stoppingToken);
-            }
-            catch (OperationCanceledException) { }
+            logger.LogInformation("reconnecting in {Delay}...", _reconnectDelay);
+            await Task.Delay(_reconnectDelay, stoppingToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
         }
 
-        _logger.LogInformation("stopped");
+        logger.LogInformation("stopped");
     }
 
+    private static async Task RunTasksAsync(Task[] tasks, CancellationTokenSource cts)
+    {
+        await Task.WhenAny(tasks);
+        await cts.CancelAsync();
+        await Task.WhenAll(tasks);
+    }
+    
     private async Task SendAgentInitMessageAsync(IWebSocket ws, CancellationToken cancellationToken)
     {
-        var dsc = await _audioAgent.GetAudioAgentDescription();
+        var dsc = await audioAgent.GetAudioAgentDescription();
         var msg = new AgentInitMessage(dsc.AgentIcon);
-        await ws.SendJsonAsync(msg, cancellationToken);
-    }
-    
-    private async Task SendSnapshotsLoopAsync(IWebSocket ws, CancellationToken cancellationToken)
-    {
-        using var timer = new PeriodicTimer(_snapshotInterval);
-
-        while (await timer.WaitForNextTickAsync(cancellationToken))
-        {
-            if (!ws.Connected)
-                break;
-
-            var streams = await _audioAgent.GetAudioStreamsAsync(cancellationToken);
-            var msg = new StreamsMessage(streams.Select(x => new BridgeAudioStream(x.Id, x.Source, x.Name, x.Mute, x.Volume)).ToArray());
-            await ws.SendJsonAsync(msg, cancellationToken);
-        }
-    }
-    
-    private async Task ReceiveCommandsLoopAsync(IWebSocket ws, CancellationToken cancellationToken)
-    {
-        await foreach(var json in ws.ReceiveAsync(cancellationToken))
-            await HandleIncomingMessageAsync(ws, json, cancellationToken);
-    }
-    
-    private async Task HandleIncomingMessageAsync(IWebSocket ws, string json, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var message = BridgeMessageJsonSerializer.Deserialize(json);
-            switch (message)
-            {
-                case SetVolumeMessage setVolume:
-                    await _audioAgent.SetVolumeAsync(setVolume.Id, setVolume.Volume, cancellationToken);
-                    break;
-                case SetMuteMessage setMute:
-                    await _audioAgent.ToggleMuteAsync(setMute.Id, setMute.Mute, cancellationToken);
-                    break;
-                case GetIconMessage getIcon:
-                    var icon = await _audioAgent.GetAudioStreamIconAsync(getIcon.Source, cancellationToken);
-                    await ws.SendJsonAsync(new AudioStreamIconMessage(getIcon.Source, icon.Icon), cancellationToken);
-                    break;
-                default:
-                    _logger.LogWarning("unknown message type '{Type}'", message.Type);
-                    break;
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "failed to handle message");
-        }
+        await ws.SendAsync(AgentMessageSerializer.Serialize(msg), cancellationToken);
     }
 }

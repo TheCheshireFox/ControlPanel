@@ -44,27 +44,4 @@ public static class LvglImageConverter
 
         return data;
     }
-    
-    public static byte[] ConvertToAlpha8(Image<Rgba32> img)
-    {
-        var w = img.Width;
-        var h = img.Height;
-        var buf = new byte[w * h];
-
-        var idx = 0;
-        img.ProcessPixelRows(accessor =>
-        {
-            for (var y = 0; y < h; y++)
-            {
-                var row = accessor.GetRowSpan(y);
-                for (var x = 0; x < w; x++)
-                {
-                    var p = row[x];
-                    buf[idx++] = p.A;
-                }
-            }
-        });
-
-        return buf;
-    }
 }

@@ -1,89 +1,40 @@
 using System.Buffers;
-using System.Buffers.Binary;
 using System.Diagnostics.CodeAnalysis;
+using ControlPanel.Bridge.Extensions;
 
 namespace ControlPanel.Bridge.Framer;
 
-public enum FrameType : byte
+// format magic + len(u16) + data
+public sealed class Framer(byte[] magic, ILogger logger)
 {
-    Undefined = 0xFF,
-    Data = 0,
-    ACK = 1
-}
+    private readonly Memory<byte> _magic = magic;
 
-public class Frame(ushort sequence = 0, FrameType type = FrameType.Undefined, byte[]? data = null)
-{
-    public readonly ushort Sequence = sequence;
-    public readonly FrameType Type = type;
-    public readonly byte[] Data = data ?? [];
-}
+    private readonly (FrameField Type, int Size)[] _frameFieldSizes =
+    [
+        (FrameField.Magic, magic.Length),
+        (FrameField.Length, sizeof(ushort))
+    ];
 
-// format magic + seq(u16) + type(u8) + len(u16) + data + crc16
-public sealed class Framer
-{
-    private readonly Memory<byte> _magic;
-    private readonly Memory<byte> _magicFrameBuffer;
-    private readonly ILogger _logger;
-
-    private readonly (FrameField Type, int Size)[] _frameFieldSizes;
-
-    public Framer(byte[] magic, ILogger logger)
+    public byte[] ToBytes(ReadOnlyMemory<byte> data)
     {
-        _magic = magic;
-        _magicFrameBuffer = new Memory<byte>(new byte[magic.Length]);
-        _logger = logger;
+        logger.LogDebug("Frame to bytes, size={Size}", data.Length);
 
-        _frameFieldSizes =
-        [
-            (FrameField.Magic, magic.Length),
-            (FrameField.Length, sizeof(ushort)),
-            (FrameField.Sequence, sizeof(ushort)),
-            (FrameField.Type, sizeof(FrameType)),
-            (FrameField.Data, 0), // dynamic
-            (FrameField.Crc16, sizeof(ushort)),
-        ];
-    }
-
-    public int ToBytes(Frame frame, Memory<byte> dst)
-    {
-        _logger.LogDebug("Frame to bytes, seq={Sequence}, type={Type}, size={Size}", frame.Sequence, frame.Type, frame.Data.Length);
-
-        var mem = dst;
-        Span<byte> buffer = stackalloc byte[2];
+        using var stream = new MemoryStream(new byte[GetFrameSize(data.Length)]);
+        stream.Write(_magic.Span);
+        stream.WriteUInt16BigEndian((ushort)data.Length);
+        stream.Write(data.Span);
         
-        Write(_magic.Span);
-        WriteUInt16BigEndian(buffer, (ushort)frame.Data.Length);
-        WriteUInt16BigEndian(buffer, frame.Sequence);
-        Write([(byte)frame.Type]);
-        Write(frame.Data);
-        WriteUInt16BigEndian(buffer, Crc16Ccitt.Compute(dst[..^mem.Length].Span));
-        
-        return dst.Length - mem.Length;
-
-        void Write(Span<byte> src)
-        {
-            src.CopyTo(mem.Span);
-            mem = mem[src.Length..];
-        }
-
-        void WriteUInt16BigEndian(Span<byte> buffer, ushort value)
-        {
-            BinaryPrimitives.WriteUInt16BigEndian(buffer, value);
-            Write(buffer);
-        }
+        return stream.ToArray();
     }
 
-    public int GetFrameSize(int dataSize) => GetFrameSizeInternal(dataSize);
-    
-    private int GetFrameSizeInternal(int dataSize, params FrameField[] exclude)
-    {
-        return _frameFieldSizes.Where(x => !exclude.Contains(x.Type)).Sum(x => x.Size) + dataSize;
-    }
+    public int GetFrameSize(int dataSize) => _frameFieldSizes.Sum(x => x.Size) + dataSize;
 
-    public bool TryParseFrame(ref SequenceReader<byte> reader, [NotNullWhen(true)] out Frame? frame)
+    public bool TryParseFrame(ref SequenceReader<byte> reader, [NotNullWhen(true)] out ReadOnlyMemory<byte>? frame)
     {
         frame = null;
 
+        Span<byte> magicBuffer = stackalloc byte[_magic.Length];
+        
         SequenceReader<byte> frameReader;
         while (true)
         {
@@ -93,10 +44,10 @@ public sealed class Framer
                 return false;
             }
             
-            if (!reader.TryCopyTo(_magicFrameBuffer.Span))
+            if (!reader.TryCopyTo(magicBuffer))
                 return false;
 
-            if (_magicFrameBuffer.Span.SequenceEqual(_magic.Span))
+            if (magicBuffer.SequenceEqual(_magic.Span))
             {
                 frameReader = reader;
                 frameReader.Advance(_magic.Length);
@@ -109,42 +60,23 @@ public sealed class Framer
         if (!frameReader.TryReadBigEndian(out var len))
             return false;
         
-        if (len + sizeof(ushort) + sizeof(FrameType) + sizeof(ushort) > frameReader.Remaining)
-            return false;
-        
-        if (!frameReader.TryReadBigEndian(out var seq))
-            return false;
-        
-        if (!frameReader.TryRead(out var type))
-            return false;
-        
-        if (!frameReader.TryReadExactBytes(len, out var frameData))
-            return false;
-        
-        if (!frameReader.TryReadBigEndian(out var crc16))
+        if (len > frameReader.Remaining)
             return false;
 
-        var frameCrc16 = Crc16Ccitt.Compute(reader, GetFrameSizeInternal(len, exclude: FrameField.Crc16));
+        if (!frameReader.TryReadExact(len, out var frameSequence))
+            return false;
+
+        frame = frameSequence.IsSingleSegment
+            ? frameSequence.First
+            : frameSequence.ToArray();
 
         reader = frameReader;
-        
-        if (frameCrc16 != crc16)
-        {
-            _logger.LogError("bad crc {Expected} != {Calculated}", frameCrc16, crc16);
-            return false;
-        }
-
-        frame = new Frame(seq, (FrameType)type, frameData);
         return true;
     }
 
     private enum FrameField
     {
         Magic,
-        Length,
-        Sequence,
-        Type,
-        Data,
-        Crc16
+        Length
     }
 }

@@ -1,161 +1,35 @@
-using System.Text.Json;
-using System.Text.RegularExpressions;
-using ControlPanel.Bridge.Options;
-using ControlPanel.Bridge.Protocol;
+using ControlPanel.Agent.Messaging;
 using ControlPanel.Protocol;
+using ControlPanel.Shared.Messaging;
 using ControlPanel.WebSocket;
-using Microsoft.Extensions.Options;
-using StreamsMessage = ControlPanel.Protocol.StreamsMessage;
 
 namespace ControlPanel.Bridge.Agent;
 
 public interface IAgentConnection
 {
     string AgentId { get; }
-    Task SendAsync(BridgeMessage message, CancellationToken cancellationToken);
+    Task RunAsync(CancellationToken cancellationToken);
+    Task SendAsync(AgentMessage message, CancellationToken cancellationToken);
 }
 
-public sealed class AgentConnection : IAgentConnection, IDisposable
+public sealed class AgentConnection(
+    IWebSocket ws,
+    IAgentContext agentContext,
+    IAudioStreamIconCache audioStreamIconCache,
+    IMessageService<AgentMessage> messageService)
+    : IAgentConnection, IMessageTransport<AgentMessage>, IDisposable
 {
-    private readonly ILogger<AgentConnection> _logger;
-    private readonly IWebSocket _ws;
-    private readonly IAudioStreamRepository _audioStreamRepository;
-    private readonly IAudioStreamIconCache _audioStreamIconCache;
-    private readonly IControllerConnection _controllerConnection;
-    private readonly Regex[] _exclude;
+    public string AgentId => agentContext.AgentId;
 
-    private readonly AgentAppIconProvider _agentAppIconProvider = new(32, 10);
+    public Task RunAsync(CancellationToken cancellationToken)
+        => messageService.RunAsync(cancellationToken);
+
+    public Task SendAsync(AgentMessage message, CancellationToken cancellationToken)
+        => ws.SendAsync(AgentMessageSerializer.Serialize(message), cancellationToken);
+
+    public IAsyncEnumerable<AgentMessage> ReadAsync(CancellationToken cancellationToken)
+        => ws.ReceiveAsync(cancellationToken).Select(AgentMessageSerializer.Deserialize);
     
-    public string AgentId { get; }
-    
-    public AgentConnection(string agentId,
-        IWebSocket ws,
-        IAudioStreamRepository audioStreamRepository,
-        IAudioStreamIconCache audioStreamIconCache,
-        IControllerConnection controllerConnection,
-        IOptions<StreamsOptions> streamsOptions,
-        ILogger<AgentConnection> logger)
-    {
-        AgentId = agentId;
-        _ws = ws;
-        _audioStreamRepository = audioStreamRepository;
-        _audioStreamIconCache = audioStreamIconCache;
-        _controllerConnection = controllerConnection;
-        _logger = logger;
-        _exclude = CompileRegexes(streamsOptions.Value.Exclude).ToArray();
-        _audioStreamRepository.OnSnapshotChangedAsync += SnapshotChangedAsync;
-    }
-    
-    public async Task HandleAgentAsync(CancellationToken cancellationToken)
-    {
-        await foreach(var json in _ws.ReceiveAsync(cancellationToken))
-            await HandleAgentMessageAsync(json, cancellationToken);
-    }
-
-    public Task SendAsync(BridgeMessage message, CancellationToken cancellationToken)
-    {
-        return _ws.SendAsync((string)JsonSerializer.Serialize((dynamic)message), cancellationToken);
-    }
-    
-    private async Task HandleAgentMessageAsync(string json, CancellationToken cancellationToken)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            
-            _logger.LogDebug("{json}", json);
-            
-            var type = doc.Deserialize<BridgeMessage>()?.Type;
-            if (type == null)
-            {
-                _logger.LogError("message without Type, agent: {Id}", AgentId);
-                return;
-            }
-            
-            switch (type)
-            {
-                case BridgeMessageType.AgentInit:
-                {
-                    var msg = doc.Deserialize<AgentInitMessage>() ?? throw new JsonException($"Unable to parse {type} message");
-                    _agentAppIconProvider.SetAgentIcon(msg.AgentIcon);
-                    break;
-                }
-                case BridgeMessageType.Streams:
-                {
-                    var msg = doc.Deserialize<StreamsMessage>() ?? throw new JsonException($"Unable to parse {type} message");
-                    var streams = FilterStreams(msg.Streams);
-                    await _audioStreamRepository.UpdateAsync(AgentId, streams, cancellationToken);
-                    break;
-                }
-                case BridgeMessageType.Icon:
-                {
-                    var msg = doc.Deserialize<AudioStreamIconMessage>() ?? throw new JsonException($"Unable to parse {type} message");
-                    var (size, icon) = ToUartIcon(msg);
-                    await _controllerConnection.SendMessageAsync(new IconMessage(msg.Source, AgentId, size, icon), cancellationToken);
-                    break;
-                }
-                default:
-                    _logger.LogWarning("Unknown message type '{type}', agent: {Id}", type, AgentId);
-                    break;
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to handle message, agent: {Id}", AgentId);
-        }
-    }
-
-    private (int Size, byte[] Icon) ToUartIcon(AudioStreamIconMessage msg)
-    {
-        using var appImg = _agentAppIconProvider.GetAgentAppIcon(msg.Icon);
-        var icon = LvglImageConverter.ConvertToRgb565A8(appImg);
-                    
-        _logger.LogDebug("New icon: {Source}, size: {Size}", msg.Source, msg.Icon.Length);
-        _audioStreamIconCache.AddIcon(msg.Source, AgentId, new AudioCacheIcon(_agentAppIconProvider.IconSize, icon));
-
-        return (_agentAppIconProvider.IconSize, icon);
-    }
-
-    private IEnumerable<BridgeAudioStream> FilterStreams(IEnumerable<BridgeAudioStream> streams)
-    {
-        return streams.Where(x => !_exclude.Any(r => r.IsMatch(x.Name)));
-    }
-    
-    private Task SnapshotChangedAsync(AudioStreamIncrementalSnapshot snapshot, CancellationToken cancellationToken)
-    {
-        var deletedSources = snapshot.Deleted
-            .Where(x => x.Id.AgentId == AgentId)
-            .Select(x => x.Source)
-            .Distinct();
-        
-        foreach (var source in deletedSources)
-            _audioStreamIconCache.RemoveIcon(source, AgentId);
-        
-        return Task.CompletedTask;
-    }
-
-    private IEnumerable<Regex> CompileRegexes(IEnumerable<string> patters)
-    {
-        List<Regex> regexes = [];
-        
-        foreach (var pattern in patters)
-        {
-            try
-            {
-                regexes.Add(new Regex(pattern, RegexOptions.Compiled));
-            }
-            catch (Exception exc)
-            {
-                _logger.LogError(exc, "Failed to parse regex: {Message}", exc.Message);
-            }
-        }
-
-        return regexes;
-    }
-
-    public void Dispose()
-    {
-        _audioStreamRepository.OnSnapshotChangedAsync -= SnapshotChangedAsync;
-        _audioStreamIconCache.RemoveIcons(AgentId);
-    }
+    public void Dispose() 
+        => audioStreamIconCache.RemoveIcons(AgentId);
 }

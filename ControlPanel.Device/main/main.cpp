@@ -1,4 +1,4 @@
-#define LV_ASSERT_HANDLER configASSERT(false)
+#define LV_ASSERT_HANDLER configASSERT(false);
 
 #include <stdio.h>
 #include <optional>
@@ -24,49 +24,34 @@
 #include "waveshare_st7789_lvgl.hpp"
 #include "volume_display.hpp"
 #include "backlight_timer.hpp"
-#include "uart_log_proto_forwarder.hpp"
+#include "esp_private/log_level.h"
 #include "utils/lv_sync.hpp"
 #include "utils/lvgl_logging.hpp"
 
-#include "protocol/frame_host_connection.hpp"
-#include "protocol/transport/uart_transport.hpp"
-#include "protocol/transport/bt_uart_transport.hpp"
+#include "protocol/usb_cdc_connection.hpp"
 #include "protocol/protocol.hpp"
 
 static constexpr char TAG[] = "main";
 
 // ST7789T3
-#define LCD_SPI_HOST   SPI3_HOST
+#define LCD_SPI_HOST   SPI2_HOST
 #define LCD_SPI_CLOCK  (60 * 1000000)
-#define PIN_LCD_MOSI   GPIO_NUM_23
-#define PIN_LCD_SCLK   GPIO_NUM_18
-#define PIN_LCD_CS     GPIO_NUM_5
-#define PIN_LCD_DC     GPIO_NUM_27
-#define PIN_LCD_RST    GPIO_NUM_26 // shared with touch RST
-#define PIN_LCD_BL     GPIO_NUM_25
+#define PIN_LCD_MOSI   GPIO_NUM_5
+#define PIN_LCD_SCLK   GPIO_NUM_6
+#define PIN_LCD_CS     GPIO_NUM_7
+#define PIN_LCD_DC     GPIO_NUM_15
+#define PIN_LCD_RST    GPIO_NUM_16 // shared with touch RST
+#define PIN_LCD_BL     GPIO_NUM_17
 #define LCD_WIDTH      240
 #define LCD_HEIGHT     320
 
 // CST328
 #define I2C_TOUCH_PORT    I2C_NUM_0
 #define I2C_TOUCH_FREQ_HZ 400000
-#define PIN_TOUCH_SDA     GPIO_NUM_21
-#define PIN_TOUCH_SCL     GPIO_NUM_22
-#define PIN_TOUCH_RST     GPIO_NUM_26 // shared with lcd RST
-#define PIN_TOUCH_INT     GPIO_NUM_4
-
-// SD
-#define SD_SPI_HOST SPI2_HOST
-#define SD_SCK      GPIO_NUM_14
-#define SD_MISO     GPIO_NUM_13
-#define SD_MOSI     GPIO_NUM_32
-#define SD_CS       GPIO_NUM_33
-
-#define UART_PORT       UART_NUM_0
-#define UART_TX         GPIO_NUM_1 // 17
-#define UART_RX         GPIO_NUM_3 // 16
-#define UART_BUF_SIZE   8096
-#define UART_BAUDRATE   921600
+#define PIN_TOUCH_SDA     GPIO_NUM_18
+#define PIN_TOUCH_SCL     GPIO_NUM_9
+#define PIN_TOUCH_RST     GPIO_NUM_16 // shared with lcd RST
+#define PIN_TOUCH_INT     GPIO_NUM_10
 
 #define BL_TIMER_LONG  uint64_t(3600 * 1000)
 #define BL_TIMER_SHORT uint64_t(30 * 1000)
@@ -75,10 +60,7 @@ static std::optional<cst328_driver_t> cst328_driver;
 static std::optional<waveshare_st7789_t> st7789_driver;
 static std::optional<volume_display_t> volume_display;
 static std::optional<backlight_timer_t<waveshare_st7789_t>> backlight_timer;
-
-static constexpr std::array<uint8_t, 2> MAGIC{0x19, 0x16};
-static std::optional<transport::bt_uart_transport_t> frame_transport;
-static std::optional<transport::frame_host_connection_t<transport::bt_uart_transport_t, MAGIC>> host_connection;
+static std::optional<transport::usb_cdc_connection_t<TINYUSB_CDC_ACM_0>> host_connection;
 
 static void nvs_init()
 {
@@ -90,7 +72,7 @@ static void nvs_init()
     ESP_ERROR_CHECK(ret);
 }
 
-static void spi_bus_init(void)
+static void spi_bus_init()
 {
     spi_bus_config_t buscfg = {
         .mosi_io_num = PIN_LCD_MOSI,
@@ -100,10 +82,10 @@ static void spi_bus_init(void)
         .quadhd_io_num = -1,
         .max_transfer_sz = LCD_WIDTH * LCD_HEIGHT * 2 + 8,
     };
-    ESP_ERROR_CHECK(spi_bus_initialize(SPI3_HOST, &buscfg, SPI_DMA_CH_AUTO));
+    ESP_ERROR_CHECK(spi_bus_initialize(LCD_SPI_HOST, &buscfg, SPI_DMA_CH_AUTO));
 }
 
-void touch_init_for_lvgl(void)
+void touch_init_for_lvgl()
 {
     auto [invert_x, invert_y, swap_xy] = std::tuple{false, false, false};
     switch (st7789_driver->orientation())
@@ -121,14 +103,14 @@ void touch_init_for_lvgl(void)
     ESP_LOGI(TAG, "LVGL touch initialized");
 }
 
-void driver_init(void)
+void driver_init()
 {
     ESP_ERROR_CHECK(gpio_install_isr_service(0));
 
     spi_bus_init();
 
     cst328_driver.emplace(I2C_TOUCH_PORT, I2C_TOUCH_FREQ_HZ, PIN_TOUCH_SDA, PIN_TOUCH_SCL, PIN_TOUCH_INT);
-    st7789_driver.emplace(SPI3_HOST, PIN_LCD_CS, PIN_LCD_DC, PIN_LCD_RST, PIN_LCD_BL, LCD_HEIGHT, LCD_WIDTH, LCD_SPI_CLOCK, orientation_t::landscape);
+    st7789_driver.emplace(LCD_SPI_HOST, PIN_LCD_CS, PIN_LCD_DC, PIN_LCD_RST, PIN_LCD_BL, LCD_HEIGHT, LCD_WIDTH, LCD_SPI_CLOCK, orientation_t::landscape);
     backlight_timer.emplace(*st7789_driver, BL_TIMER_SHORT);
     
     cst328_driver->on_touch(+[](const touch_point_t&) { backlight_timer->kick(); });
@@ -168,32 +150,10 @@ static void lvgl_timer_init()
     ESP_LOGI(TAG, "LVGL timer started");
 }
 
-template<typename TFrameTransport>
-void host_connection_init(std::optional<TFrameTransport>& ft)
+void host_connection_init()
 {
-    if constexpr (std::is_same_v<TFrameTransport, transport::uart_transport_t>)
-    {
-        ft.emplace(UART_PORT, UART_TX, UART_RX, UART_BUF_SIZE, UART_BAUDRATE);
-    }
-    else if constexpr (std::is_same_v<TFrameTransport, transport::bt_uart_transport_t>)
-    {
-        ft.emplace("control panel", "control panel");
-    }
-    else
-    {
-        static_assert(!sizeof(TFrameTransport*), "frame transport is not initialized");
-    }
-
-    ft->init();
-
-    host_connection.emplace(*ft);
+    host_connection.emplace();
     host_connection->init();
-
-    if constexpr (std::is_same_v<TFrameTransport, transport::uart_transport_t>)
-    {
-        uart_log_proto_forwarder::init(host_connection.value());
-    }
-
     ESP_LOGI(TAG, "Frame processor initialized");
 }
 
@@ -220,6 +180,8 @@ void host_connection_register_handler()
             volume_display->update_icon(msg->source, msg->agent_id, msg->size, msg->size, msg->icon);
         }
     });
+
+    ESP_LOGI(TAG, "Connection handlers registered");
 }
 
 static lv_display_t* st7789_create_lvgl_display()
@@ -241,8 +203,13 @@ static lv_display_t* st7789_create_lvgl_display()
 
 extern "C" void app_main(void)
 {
+    esp_log_set_level_master(ESP_LOG_DEBUG);
+    esp_log_level_set(volume_display_t::TAG, ESP_LOG_DEBUG);
+    esp_log_level_set(TAG, ESP_LOG_DEBUG);
+    esp_log_level_set("TinyUSB", ESP_LOG_DEBUG);
+
     nvs_init();
-    host_connection_init(frame_transport);
+    host_connection_init();
 
     ESP_LOGI(TAG, "Starting app_main...");
 
@@ -256,28 +223,36 @@ extern "C" void app_main(void)
     volume_display.emplace(0, 0, LV_PCT(100), LV_PCT(100));
     volume_display->on_volume_change(+[](const event_id& id, float volume)
     {
+        ESP_LOGD(TAG, "volume change id=%s volume=%f", id.id.c_str(), volume);
         host_connection->send(serialize_bridge_message(set_volume_message_t {
             .id = { id.id, id.agent_id },
             .volume = volume
         }));
+        ESP_LOGD(TAG, "message sent");
     });
     volume_display->on_mute_change(+[](const event_id& id, bool mute)
     {
+        ESP_LOGD(TAG, "mute change id=%s mute=%d", id.id.c_str(), mute);
         host_connection->send(serialize_bridge_message(set_mute_message_t {
             .id = { id.id, id.agent_id },
             .mute = mute
         }));
+        ESP_LOGD(TAG, "message sent");
     });
     volume_display->on_icon_missing(+[](const std::string& source, const std::string& agent_id)
     {
+        ESP_LOGD(TAG, "icon missing source=%s agent_id=%s", source.c_str(), agent_id.c_str());
         host_connection->send(serialize_bridge_message(get_icon_message_t {
             .source = source,
             .agent_id = agent_id
         }));
+        ESP_LOGD(TAG, "message sent");
     });
 
+    ESP_LOGI(TAG, "Volume display initialized");
+
     host_connection_register_handler();
-    host_connection->send(serialize_bridge_message(request_refresh_message_t{}), 1000, std::numeric_limits<uint32_t>::max());
+    host_connection->send(serialize_bridge_message(request_refresh_message_t{}));
 
     ESP_LOGI(TAG, "Initialization completed");
 }
