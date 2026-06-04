@@ -231,7 +231,8 @@ public class BridgeDeviceIntegrationTests
 
         public async Task<T> ReceiveDeviceMessageAsync<T>() where T : DeviceMessage
         {
-            var bytes = await WithTimeoutAsync(_toDevice.Reader.ReadAsync(TestContext.CurrentContext.CancellationToken).AsTask());
+            var bytes = await _toDevice.Reader.ReadAsync(TestContext.CurrentContext.CancellationToken).AsTask()
+                .WaitAsync(TimeSpan.FromSeconds(2), TestContext.CurrentContext.CancellationToken);
             return (T)DeviceMessageSerializer.Deserialize(bytes);
         }
     }
@@ -256,18 +257,9 @@ public class BridgeDeviceIntegrationTests
         public async Task<T> ReadAsync<T>(string agentId) where T : AgentMessage
         {
             var channel = _messages.GetOrAdd(agentId, _ => Channel.CreateUnbounded<AgentMessage>());
-            var message = await WithTimeoutAsync(channel.Reader.ReadAsync(TestContext.CurrentContext.CancellationToken).AsTask());
+            var message = await channel.Reader.ReadAsync(TestContext.CurrentContext.CancellationToken).AsTask()
+                .WaitAsync(TimeSpan.FromSeconds(2), TestContext.CurrentContext.CancellationToken);
             return (T)message;
         }
-    }
-
-    private static async Task<T> WithTimeoutAsync<T>(Task<T> task)
-    {
-        var timeout = Task.Delay(TimeSpan.FromSeconds(2), TestContext.CurrentContext.CancellationToken);
-        var completed = await Task.WhenAny(task, timeout);
-        if (completed == timeout)
-            throw new TimeoutException("Timed out waiting for integration test message.");
-
-        return await task;
     }
 }

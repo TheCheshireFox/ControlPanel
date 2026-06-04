@@ -17,7 +17,8 @@ public class PtyFramedByteChannelTests
         await using var channel = CreateChannel(pty.SlaveName);
         var payload = new byte[] { 0x01, 0x02, 0x03 };
 
-        await WithTimeoutAsync(channel.WriteAsync(payload, TestContext.CurrentContext.CancellationToken));
+        await channel.WriteAsync(payload, TestContext.CurrentContext.CancellationToken)
+            .WaitAsync(TimeSpan.FromSeconds(2), TestContext.CurrentContext.CancellationToken);
         var frame = await pty.ReadMasterExactlyAsync(4 + payload.Length);
 
         Assert.That(frame, Is.EqualTo(new byte[] { 0xAB, 0xBC, 0x00, 0x03, 0x01, 0x02, 0x03 }));
@@ -61,16 +62,6 @@ public class PtyFramedByteChannelTests
             return frame;
 
         throw new TimeoutException("Timed out waiting for frame from pseudo-terminal.");
-    }
-
-    private static async Task WithTimeoutAsync(Task task)
-    {
-        var timeout = Task.Delay(TimeSpan.FromSeconds(2), TestContext.CurrentContext.CancellationToken);
-        var completed = await Task.WhenAny(task, timeout);
-        if (completed == timeout)
-            throw new TimeoutException("Timed out waiting for pseudo-terminal operation.");
-
-        await task;
     }
 
     private sealed class PseudoTerminal : IAsyncDisposable
