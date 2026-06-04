@@ -43,12 +43,15 @@ internal sealed class WindowsAudioAgent : IAudioAgent, IDisposable
             var id = await _idMapper.GetMappedIdAsync(session.Id, cancellationToken);
             var name = GetSessionName(session);
 
+            var source = ProcessUtility.GetBinaryPath(session.ProcessId) ?? string.Empty;
+            var icon = _iconLocator.FindIcon(source);
             var stream = new AudioStream(
                 Id: id,
-                Source: ProcessUtility.GetBinaryPath(session.ProcessId) ?? string.Empty,
+                Source: source,
                 Name: name,
                 Mute: session.Mute,
-                Volume: session.Volume
+                Volume: session.Volume,
+                IconHash: icon.IconHash
             );
 
             result[stream.Id] = stream;
@@ -84,7 +87,7 @@ internal sealed class WindowsAudioAgent : IAudioAgent, IDisposable
             {
                 await _idMapper.PruneAsync(_audioSessionProvider.Sessions.Select(x => x.Id), _cts.Token);
             }
-            catch (Exception) when (!_cts.IsCancellationRequested)
+            catch (OperationCanceledException) when (!_cts.IsCancellationRequested)
             {
                 // NOP
             }

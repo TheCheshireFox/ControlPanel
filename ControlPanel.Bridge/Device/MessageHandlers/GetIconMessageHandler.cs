@@ -12,9 +12,9 @@ public class GetIconMessageHandler(
 {
     public async ValueTask Handle(GetIconDeviceMessage deviceMessage, CancellationToken cancellationToken)
     {
-        if (iconCache.TryGetIcon(deviceMessage.Source, deviceMessage.AgentId, out var icon))
+        if (iconCache.TryGetIcon(deviceMessage.Source, deviceMessage.AgentId, deviceMessage.IconHash, out var icon))
         {
-            await connection.SendMessageAsync(new IconDeviceMessage(deviceMessage.Source, deviceMessage.AgentId, icon.Size, icon.Icon), cancellationToken);
+            await connection.SendMessageAsync(new IconDeviceMessage(deviceMessage.Source, deviceMessage.AgentId, deviceMessage.IconHash, icon.Size, icon.Icon), cancellationToken);
         }
         else
         {

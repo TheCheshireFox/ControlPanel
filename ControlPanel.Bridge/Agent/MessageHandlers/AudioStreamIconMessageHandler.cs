@@ -14,7 +14,7 @@ public class AudioStreamIconMessageHandler(
     public async ValueTask Handle(AudioStreamIconMessage message, CancellationToken cancellationToken)
     {
         var (size, icon) = ToUartIcon(message);
-        await deviceConnection.SendMessageAsync(new IconDeviceMessage(message.Source, context.AgentId, size, icon), cancellationToken);
+        await deviceConnection.SendMessageAsync(new IconDeviceMessage(message.Source, context.AgentId, message.IconHash, size, icon), cancellationToken);
     }
 
     private (int Size, byte[] Icon) ToUartIcon(AudioStreamIconMessage msg)
@@ -23,7 +23,7 @@ public class AudioStreamIconMessageHandler(
         var icon = LvglImageConverter.ConvertToRgb565A8(appImg);
 
         logger.LogDebug("New icon: {Source}, size: {Size}", msg.Source, msg.Icon.Length);
-        audioStreamIconCache.AddIcon(msg.Source, context.AgentId, new AudioCacheIcon(agentAppIconProvider.IconSize, icon));
+        audioStreamIconCache.AddIcon(msg.Source, context.AgentId, msg.IconHash, new AudioCacheIcon(agentAppIconProvider.IconSize, icon));
 
         return (agentAppIconProvider.IconSize, icon);
     }

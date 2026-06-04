@@ -14,4 +14,4 @@ public record AudioStream(
     [property: Key("name")] string? Name, 
     [property: Key("mute")] bool? Mute, 
     [property: Key("volume")] double? Volume,
-    [property: Key("icon_hash")] int IconHash);
+    [property: Key("icon_hash")] int? IconHash);

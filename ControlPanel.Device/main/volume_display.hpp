@@ -1,11 +1,13 @@
 #pragma once
 
+#include <algorithm>
 #include <string>
 #include <cstring>
 #include <map>
 #include <memory>
 #include <tuple>
 #include <set>
+#include <vector>
 
 #include "lvgl.h"
 #include "utils/lv_sync.hpp"
@@ -34,6 +36,25 @@ class volume_display_t
         lv_obj_t* item;
         std::unique_ptr<list_item_t> list_item;
         std::string source;
+        int32_t icon_hash;
+    };
+
+    struct icon_key_t
+    {
+        std::string source;
+        std::string agent_id;
+
+        bool operator<(const icon_key_t& other) const { return std::tuple{source, agent_id} < std::tuple{other.source, other.agent_id}; }
+        bool operator==(const icon_key_t& other) const { return std::tuple{source, agent_id} == std::tuple{other.source, other.agent_id}; }
+    };
+
+    struct cached_icon_t
+    {
+        int32_t icon_hash;
+        uint32_t w;
+        uint32_t h;
+        uint32_t last_access;
+        std::vector<uint8_t> data;
     };
 
 public:
@@ -48,7 +69,7 @@ public:
 
     void refresh(Iterable<bridge_audio_stream_t> auto&& updated, Iterable<bridge_audio_stream_id_t> auto&& deleted)
     {
-        std::vector<std::tuple<std::string, std::string>> missing_icons;
+        std::set<std::tuple<std::string, std::string, int32_t>> missing_icons;
         {
             std::scoped_lock lock{lv_sync};
 
@@ -62,9 +83,9 @@ public:
                 if (it == _volume_list_items.end())
                 {
                     ESP_LOGD(TAG, "add (%s, %s) %s", id.id.c_str(), id.agent_id.c_str(), stream.name.value_or({}).c_str());
-                    if (stream.name && stream.volume && stream.mute)
+                    if (stream.name && stream.volume && stream.mute && stream.icon_hash)
                     {
-                        add_item(id, stream.source, *stream.name, *stream.volume, *stream.mute, missing_icons);
+                        add_item(id, stream.source, *stream.name, *stream.volume, *stream.mute, *stream.icon_hash, missing_icons);
                     }
                     else
                     {
@@ -81,27 +102,37 @@ public:
                 if (stream.name) list_item->set_title(*stream.name);
                 if (stream.mute) list_item->set_mute(*stream.mute);
                 if (stream.volume) list_item->set_volume(static_cast<int32_t>(*stream.volume * 100));
+                if (stream.icon_hash && it->second.icon_hash != *stream.icon_hash)
+                {
+                    it->second.icon_hash = *stream.icon_hash;
+                    set_cached_icon_or_request(id, it->second.source, *stream.icon_hash, *list_item, missing_icons);
+                }
             }
         }
 
         if (!_on_icon_missing)
             return;
 
-        for (const auto& [source, agent]: missing_icons)
-            _on_icon_missing(source, agent);
+        for (const auto& [source, agent, icon_hash]: missing_icons)
+            _on_icon_missing(source, agent, icon_hash);
     }
 
-    void update_icon(const std::string& source, const std::string& agent_id, uint32_t w, uint32_t h, std::span<const uint8_t> rgb565a8)
+    void update_icon(const std::string& source, const std::string& agent_id, int32_t icon_hash, uint32_t w, uint32_t h, std::span<const uint8_t> rgb565a8)
     {
         std::scoped_lock lock{lv_sync};
 
+        auto [cache_it, _] = _icon_cache.insert_or_assign(
+            icon_key_t{source, agent_id},
+            cached_icon_t{icon_hash, w, h, next_icon_access(), std::vector<uint8_t>{rgb565a8.begin(), rgb565a8.end()}});
+        trim_icon_cache();
+
         for (auto& [id, vl] : _volume_list_items)
         {
-            if (id.agent_id != agent_id || vl.source != source)
+            if (id.agent_id != agent_id || vl.source != source || vl.icon_hash != icon_hash)
                 continue;
             
             ESP_LOGD(TAG, "update icon for (%s, %s), size=%d", id.id.c_str(), id.agent_id.c_str(), rgb565a8.size());
-            vl.list_item->set_app_image(LV_COLOR_FORMAT_RGB565A8, w, h, rgb565a8);
+            vl.list_item->set_app_image(LV_COLOR_FORMAT_RGB565A8, cache_it->second.w, cache_it->second.h, cache_it->second.data);
         }
     }
 
@@ -173,10 +204,10 @@ private:
         }
     }
 
-    void add_item(const event_id& id, const std::string& source, const std::string& title, float volume, bool mute, std::vector<std::tuple<std::string, std::string>>& missing_icons)
+    void add_item(const event_id& id, const std::string& source, const std::string& title, float volume, bool mute, int32_t icon_hash, std::set<std::tuple<std::string, std::string, int32_t>>& missing_icons)
     {
         auto item = _volume_list.add_item();
-        auto [it, inserted] = _volume_list_items.emplace(id, vl_list_item_t{ item, std::make_unique<list_item_t>(item), source });
+        auto [it, inserted] = _volume_list_items.emplace(id, vl_list_item_t{ item, std::make_unique<list_item_t>(item), source, icon_hash });
         if (!inserted)
         {
             _volume_list.delete_item(item);
@@ -191,7 +222,43 @@ private:
         list_item->on_mute_changed([id, this](bool mute) { mute_change(id, mute); });
         list_item->on_volume_changed([id, this](int8_t volume) { volume_change(id, volume); });
 
-        missing_icons.emplace_back(std::make_tuple(source, id.agent_id));
+        set_cached_icon_or_request(id, source, icon_hash, *list_item, missing_icons);
+    }
+
+    void set_cached_icon_or_request(const event_id& id, const std::string& source, int32_t icon_hash, list_item_t& list_item, std::set<std::tuple<std::string, std::string, int32_t>>& missing_icons)
+    {
+        auto cache_it = _icon_cache.find(icon_key_t{source, id.agent_id});
+        if (cache_it != _icon_cache.end() && cache_it->second.icon_hash == icon_hash)
+        {
+            auto& icon = cache_it->second;
+            icon.last_access = next_icon_access();
+            ESP_LOGD(TAG, "reuse icon for (%s, %s), hash=%d", id.id.c_str(), id.agent_id.c_str(), icon_hash);
+            list_item.set_app_image(LV_COLOR_FORMAT_RGB565A8, icon.w, icon.h, icon.data);
+            return;
+        }
+
+        missing_icons.emplace(std::make_tuple(source, id.agent_id, icon_hash));
+    }
+
+    void trim_icon_cache()
+    {
+        static constexpr std::size_t max_cached_icons = 16;
+
+        if (_icon_cache.size() <= max_cached_icons)
+            return;
+
+        auto it = std::ranges::min_element(_icon_cache,
+            [](const auto& lhs, const auto& rhs){ return lhs.second.last_access < rhs.second.last_access; });
+
+        if (it == _icon_cache.end())
+            return;
+
+        _icon_cache.erase(it);
+    }
+
+    uint32_t next_icon_access()
+    {
+        return ++_icon_access;
     }
 
     static lv_obj_t* create_content(int32_t x, int32_t y, int32_t w, int32_t h)
@@ -211,7 +278,9 @@ private:
     lv_obj_t* _content;
     flex_list_t _volume_list;
     std::map<event_id, vl_list_item_t> _volume_list_items;
+    std::map<icon_key_t, cached_icon_t> _icon_cache;
+    uint32_t _icon_access = 0;
     std::function<void(const event_id& id, float)> _on_volume_changed;
     std::function<void(const event_id& id, bool)> _on_mute_changed;
-    std::function<void(const std::string&, const std::string&)> _on_icon_missing;
+    std::function<void(const std::string&, const std::string&, int32_t)> _on_icon_missing;
 };

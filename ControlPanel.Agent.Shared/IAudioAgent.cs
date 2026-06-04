@@ -2,12 +2,15 @@ namespace ControlPanel.Agent.Shared;
 
 public record AudioAgentDescription(byte[] AgentIcon);
 
-public record AudioStreamIcon(byte[] Icon)
+public record AudioStreamIcon(byte[] Icon, int IconHash)
 {
-    public static AudioStreamIcon Default { get; } = new([]);
+    public static AudioStreamIcon Default { get; } = new([], 0);
+
+    public static AudioStreamIcon FromBytes(byte[] icon)
+        => icon.Length == 0 ? Default : new AudioStreamIcon(icon, AudioStreamIconHash.Calculate(icon));
 }
 
-public record AudioStream(string Id, string Source, string Name, bool Mute, double Volume);
+public record AudioStream(string Id, string Source, string Name, bool Mute, double Volume, int IconHash);
 
 public interface IAudioAgent
 {

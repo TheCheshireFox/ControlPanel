@@ -1,3 +1,4 @@
+using ControlPanel.Bridge.Extensions;
 using ControlPanel.Bridge.Options;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
@@ -6,8 +7,8 @@ namespace ControlPanel.Bridge;
 
 public interface IAudioStreamIconCache
 {
-    bool TryGetIcon(string source, string agentId, out AudioCacheIcon icon);
-    void AddIcon(string source, string agentId, AudioCacheIcon icon);
+    bool TryGetIcon(string source, string agentId, int iconHash, out AudioCacheIcon icon);
+    void AddIcon(string source, string agentId, int iconHash, AudioCacheIcon icon);
     void RemoveIcons(string agentId);
     void RemoveIcon(string source, string agentId);
 }
@@ -22,23 +23,21 @@ public class AudioStreamIconCache(IOptions<AudioStreamIconCacheOptions> options)
         SizeLimit = options.Value.CacheSizeKb * 1024
     });
 
-    public bool TryGetIcon(string source, string agentId, out AudioCacheIcon icon)
-        => _iconCache.TryGetValue((source, agentId), out icon!);
+    public bool TryGetIcon(string source, string agentId, int iconHash, out AudioCacheIcon icon)
+        => _iconCache.TryGetValue(new IconKey(source, agentId, iconHash), out icon!);
 
-    public void AddIcon(string source, string agentId, AudioCacheIcon icon)
-        => _iconCache.Set((source, agentId), icon, new MemoryCacheEntryOptions { SlidingExpiration = _cacheExpiry, Size = icon.Icon.Length });
-    
-    public void RemoveIcons(string agentId)
-    {
-        foreach (var (s, a) in _iconCache.Keys.Cast<(string, string)>())
+    public void AddIcon(string source, string agentId, int iconHash, AudioCacheIcon icon)
+        => _iconCache.Set(new IconKey(source, agentId, iconHash), icon, new MemoryCacheEntryOptions
         {
-            if (a == agentId)
-                _iconCache.Remove((s, a));
-        }
-    }
+            SlidingExpiration = _cacheExpiry,
+            Size = icon.Icon.Length
+        });
+
+    public void RemoveIcons(string agentId)
+        => _iconCache.RemoveAll(_iconCache.Keys.Cast<IconKey>().Where(x => x.AgentId == agentId));
 
     public void RemoveIcon(string source, string agentId)
-    {
-        _iconCache.Remove((source, agentId));
-    }
+        => _iconCache.RemoveAll(_iconCache.Keys.Cast<IconKey>().Where(x => x.AgentId == agentId && x.Source == source));
+
+    private record IconKey(string Source, string AgentId, int IconHash);
 }

@@ -28,7 +28,7 @@ public class Comparer
 
 public record AudioStreamId(string Id, string AgentId);
 
-public record AudioStreamInfo(AudioStreamId Id, string Source, string Name, bool Mute, double Volume)
+public record AudioStreamInfo(AudioStreamId Id, string Source, string Name, bool Mute, double Volume, int IconHash)
 {
     public static AudioStreamInfo FromStream(AudioStreamId streamId, AgentAudioStream stream)
         => new(
@@ -36,16 +36,17 @@ public record AudioStreamInfo(AudioStreamId Id, string Source, string Name, bool
             stream.Source,
             stream.Name,
             stream.Mute,
-            stream.Volume
+            stream.Volume,
+            stream.IconHash
         );
 }
 
-public record AudioStreamDiff(AudioStreamId Id, string Source, string? Name, bool? Mute, double? Volume)
+public record AudioStreamDiff(AudioStreamId Id, string Source, string? Name, bool? Mute, double? Volume, int? IconHash)
 {
-    public bool HasChanges => Name != null || Mute != null || Volume != null; 
+    public bool HasChanges => Name != null || Mute != null || Volume != null || IconHash != null;
     
     public static AudioStreamDiff FromStreamInfo(AudioStreamInfo streamInfo)
-        => new(streamInfo.Id, streamInfo.Source, streamInfo.Name, streamInfo.Mute, streamInfo.Volume);
+        => new(streamInfo.Id, streamInfo.Source, streamInfo.Name, streamInfo.Mute, streamInfo.Volume, streamInfo.IconHash);
 }
 
 public record AudioStreamIncrementalSnapshot(AudioStreamDiff[] Updated, AudioStreamInfo[] Deleted);
@@ -59,20 +60,13 @@ public interface IAudioStreamRepository
     Task<AudioStreamInfo[]> GetAllAsync(CancellationToken cancellationToken);
 }
 
-public class AudioStreamRepository : IAudioStreamRepository
+public class AudioStreamRepository(ILogger<AudioStreamRepository> logger) : IAudioStreamRepository
 {
     private static readonly Comparer _comparer = new Comparer()
         .WithEqualityComparer<double>((x, y) => Math.Abs(x - y) < 0.01);
-    
-    private readonly ILogger<AudioStreamRepository> _logger;
-    
+
     private readonly SemaphoreSlim _streamsLock = new(1, 1);
     private readonly Dictionary<string, Dictionary<string, AudioStreamInfo>> _streams = new();
-
-    public AudioStreamRepository(ILogger<AudioStreamRepository> logger)
-    {
-        _logger = logger;
-    }
 
     public event Func<AudioStreamIncrementalSnapshot, CancellationToken, Task>? OnSnapshotChangedAsync;
 
@@ -111,9 +105,9 @@ public class AudioStreamRepository : IAudioStreamRepository
         {
             await OnSnapshotChangedAsync.InvokeAllAsync(snapshot, cancellationToken);
         }
-        catch (Exception ex) when (ex is not TaskCanceledException and not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            _logger.LogError(ex, "Failed to notify about stream changes");
+            logger.LogError(ex, "Failed to notify about stream changes");
         }
     }
     
@@ -167,7 +161,7 @@ public class AudioStreamRepository : IAudioStreamRepository
                     
             var streamId = new AudioStreamId(id, agentId);
             var newInfo = AudioStreamInfo.FromStream(streamId, stream);
-            var newDiff = new AudioStreamDiff(streamId, newInfo.Source, newInfo.Name, newInfo.Mute, newInfo.Volume);
+            var newDiff = new AudioStreamDiff(streamId, newInfo.Source, newInfo.Name, newInfo.Mute, newInfo.Volume, newInfo.IconHash);
             
             agentStreams.Add(id, newInfo);
             diffs.Add(newDiff);
@@ -185,7 +179,8 @@ public class AudioStreamRepository : IAudioStreamRepository
             Source: info.Source,
             Name: _comparer.IsEquals(info.Name, stream.Name) ? null : stream.Name,
             Mute: _comparer.IsEquals(info.Mute, stream.Mute) ? null : stream.Mute,
-            Volume: _comparer.IsEquals(info.Volume, stream.Volume) ? null : stream.Volume);
+            Volume: _comparer.IsEquals(info.Volume, stream.Volume) ? null : stream.Volume,
+            IconHash: _comparer.IsEquals(info.IconHash, stream.IconHash) ? null : stream.IconHash);
         
         if (!diff.HasChanges)
             return false;
@@ -194,7 +189,8 @@ public class AudioStreamRepository : IAudioStreamRepository
         {
             Name = stream.Name,
             Mute = stream.Mute,
-            Volume = stream.Volume
+            Volume = stream.Volume,
+            IconHash = stream.IconHash
         };
 
         return true;

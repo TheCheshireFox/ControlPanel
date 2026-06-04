@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using ControlPanel.Agent.Shared;
 using ControlPanel.Shared;
 using ControlPanel.Shared.Extensions;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace ControlPanel.Agent.Linux;
 
@@ -31,9 +32,15 @@ internal static class DictionaryExtension
         => props.TryGetValue(key, out var jsonValue) && jsonValue.TryGetValue<T>(out var value) ? value :  defaultValue;
 }
 
-internal class PipeWireAudioAgent : IAudioAgent
+internal class PipeWireAudioAgent : IAudioAgent, IDisposable
 {
+    private static readonly TimeSpan IconCacheSlidingExpiration = TimeSpan.FromHours(6);
+
     private readonly IIconLocator _iconLocator;
+    private readonly MemoryCache _iconCache = new(new MemoryCacheOptions
+    {
+        SizeLimit = 4 * 1024 * 1024
+    });
 
     public PipeWireAudioAgent(IIconLocator iconLocator)
     {
@@ -49,26 +56,32 @@ internal class PipeWireAudioAgent : IAudioAgent
 
     public async Task<AudioStream[]> GetAudioStreamsAsync(CancellationToken cancellationToken)
     {
-        var streams = (await GetPipeWireNodes(cancellationToken))
+        var nodes = (await GetPipeWireNodes(cancellationToken))
             .Where(x => x.Info is { Params.Props.Length: > 0, Props.Count: > 0 })
             .Where(x => x.Type == "PipeWire:Interface:Node" 
                         && x.Info!.Props.TryGetValue("media.class", out var v) && v.GetValue<string>() == "Stream/Output/Audio"
                         && x.Info.State == "running")
-            .Select(x =>
-            {
-                // to mute nullable warnings
-                var info = x.Info!;
-                var props = x.Info!.Params!.Props![0];
-                return new AudioStream(
-                    Id: x.Id.ToString(),
-                    Source: GetBinaryName(info.Props),
-                    Name: BuildDisplayName(x.Id, info.Props),
-                    Mute: props.Mute,
-                    Volume: Math.Pow(props.ChannelVolumes.Average(), 1.0 / 3));
-            })
             .ToArray();
 
-        return streams;
+        var streams = new List<AudioStream>(nodes.Length);
+        foreach (var node in nodes)
+        {
+            // to mute nullable warnings
+            var info = node.Info!;
+            var props = node.Info!.Params!.Props![0];
+            var source = GetBinaryName(info.Props);
+            var icon = await GetCachedIconAsync(source, cancellationToken);
+
+            streams.Add(new AudioStream(
+                Id: node.Id.ToString(),
+                Source: source,
+                Name: BuildDisplayName(node.Id, info.Props),
+                Mute: props.Mute,
+                Volume: Math.Pow(props.ChannelVolumes.Average(), 1.0 / 3),
+                IconHash: icon.IconHash));
+        }
+
+        return streams.ToArray();
     }
 
     public async Task SetVolumeAsync(string id, double volume, CancellationToken cancellationToken)
@@ -83,12 +96,35 @@ internal class PipeWireAudioAgent : IAudioAgent
     }
 
     public async Task<AudioStreamIcon> GetAudioStreamIconAsync(string source, CancellationToken cancellationToken)
+        => await GetCachedIconAsync(source, cancellationToken);
+
+    private async Task<AudioStreamIcon> GetCachedIconAsync(string source, CancellationToken cancellationToken)
     {
-        var icon = _iconLocator.FindIcon(source);
+        if (_iconCache.TryGetValue<AudioStreamIcon>(source, out var cached) && cached != null)
+            return cached;
+
+        var icon = await LoadIconAsync(source, cancellationToken);
+        _iconCache.Set(source, icon, new MemoryCacheEntryOptions
+        {
+            SlidingExpiration = IconCacheSlidingExpiration,
+            Size = Math.Max(icon.Icon.Length, 1)
+        });
+
+        return icon;
+    }
+
+    private async Task<AudioStreamIcon> LoadIconAsync(string source, CancellationToken cancellationToken)
+    {
+        var iconPath = _iconLocator.FindIcon(source);
         
-        return string.IsNullOrEmpty(icon)
+        return string.IsNullOrEmpty(iconPath)
             ? AudioStreamIcon.Default
-            : new AudioStreamIcon(await File.ReadAllBytesAsync(icon, cancellationToken));
+            : AudioStreamIcon.FromBytes(await File.ReadAllBytesAsync(iconPath, cancellationToken));
+    }
+
+    public void Dispose()
+    {
+        _iconCache.Dispose();
     }
 
     private static async Task<PipeWireNode[]> GetPipeWireNodes(CancellationToken cancellationToken)

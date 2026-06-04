@@ -5,6 +5,7 @@
 #include <span>
 #include <variant>
 #include <optional>
+#include <cstdint>
 
 #include "esp_log.h"
 #include "sdkconfig.h"
@@ -48,8 +49,9 @@ struct bridge_audio_stream_t
     std::optional<std::string> name;
     std::optional<bool> mute;
     std::optional<float> volume;
+    std::optional<int32_t> icon_hash;
 };
-SIMPLE_CONVERT_FROM_JSON(bridge_audio_stream_t, id, source, name, mute, volume);
+SIMPLE_CONVERT_FROM_JSON(bridge_audio_stream_t, id, source, name, mute, volume, icon_hash);
 
 struct streams_message_t : bridge_message_base_t<bridge_message_type_t::streams>
 {
@@ -62,10 +64,11 @@ struct icon_message_t : bridge_message_base_t<bridge_message_type_t::icon>
 {
     std::string source;
     std::string agent_id;
+    int32_t icon_hash;
     int size;
     std::span<const uint8_t> icon;
 };
-SIMPLE_CONVERT_FROM_JSON(icon_message_t, type, source, agent_id, size, icon);
+SIMPLE_CONVERT_FROM_JSON(icon_message_t, type, source, agent_id, icon_hash, size, icon);
 
 struct set_mute_message_t : bridge_message_base_t<bridge_message_type_t::set_mute>
 {
@@ -85,8 +88,9 @@ struct get_icon_message_t : bridge_message_base_t<bridge_message_type_t::get_ico
 {
     std::string source;
     std::string agent_id;
+    int32_t icon_hash;
 };
-SIMPLE_CONVERT_TO_JSON(get_icon_message_t, type, source, agent_id);
+SIMPLE_CONVERT_TO_JSON(get_icon_message_t, type, source, agent_id, icon_hash);
 
 struct request_refresh_message_t : bridge_message_base_t<bridge_message_type_t::request_refresh>
 {

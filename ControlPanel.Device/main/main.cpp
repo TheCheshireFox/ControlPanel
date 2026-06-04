@@ -176,8 +176,8 @@ void host_connection_register_handler()
         }
         else if (auto* msg = std::get_if<icon_message_t>(&bmsg))
         {
-            ESP_LOGD(TAG, "icon source=%s agent_id=%s sz=%d", msg->source.c_str(), msg->agent_id.c_str(), msg->icon.size());
-            volume_display->update_icon(msg->source, msg->agent_id, msg->size, msg->size, msg->icon);
+            ESP_LOGD(TAG, "icon source=%s agent_id=%s hash=%d sz=%d", msg->source.c_str(), msg->agent_id.c_str(), msg->icon_hash, msg->icon.size());
+            volume_display->update_icon(msg->source, msg->agent_id, msg->icon_hash, msg->size, msg->size, msg->icon);
         }
     });
 
@@ -239,12 +239,13 @@ extern "C" void app_main(void)
         }));
         ESP_LOGD(TAG, "message sent");
     });
-    volume_display->on_icon_missing(+[](const std::string& source, const std::string& agent_id)
+    volume_display->on_icon_missing(+[](const std::string& source, const std::string& agent_id, int32_t icon_hash)
     {
-        ESP_LOGD(TAG, "icon missing source=%s agent_id=%s", source.c_str(), agent_id.c_str());
+        ESP_LOGD(TAG, "icon missing source=%s agent_id=%s hash=%d", source.c_str(), agent_id.c_str(), icon_hash);
         host_connection->send(serialize_bridge_message(get_icon_message_t {
             .source = source,
-            .agent_id = agent_id
+            .agent_id = agent_id,
+            .icon_hash = icon_hash
         }));
         ESP_LOGD(TAG, "message sent");
     });

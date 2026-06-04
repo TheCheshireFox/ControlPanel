@@ -11,7 +11,7 @@ public class GetIconMessageHandler(IAudioAgent audioAgent, IWebSocket ws) : INot
     public async ValueTask Handle(GetIconMessage message, CancellationToken cancellationToken)
     {
         var icon = await audioAgent.GetAudioStreamIconAsync(message.Source, cancellationToken);
-        var iconMessage = new AudioStreamIconMessage(message.Source, icon.Icon);
+        var iconMessage = new AudioStreamIconMessage(message.Source, icon.Icon, icon.IconHash);
         
         await ws.SendAsync(AgentMessageSerializer.Serialize(iconMessage), cancellationToken);
     }

@@ -24,7 +24,7 @@ public class AudioStreamSnapshotService(IWebSocket ws, IAudioAgent audioAgent) :
                 break;
 
             var streams = await audioAgent.GetAudioStreamsAsync(cancellationToken);
-            var msg = new StreamsMessage(streams.Select(x => new AgentAudioStream(x.Id, x.Source, x.Name, x.Mute, x.Volume)).ToArray());
+            var msg = new StreamsMessage(streams.Select(x => new AgentAudioStream(x.Id, x.Source, x.Name, x.Mute, x.Volume, x.IconHash)).ToArray());
             await ws.SendAsync(AgentMessageSerializer.Serialize(msg), cancellationToken);
         }
     }

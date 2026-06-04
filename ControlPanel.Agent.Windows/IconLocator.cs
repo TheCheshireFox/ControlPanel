@@ -38,7 +38,7 @@ internal class IconLocator : IIconLocator
                     bmp.Save(ms, ImageFormat.Png);      // ImageSharp can read PNG
                     var bytes = ms.ToArray();
 
-                    return new AudioStreamIcon(bytes);
+                    return AudioStreamIcon.FromBytes(bytes);
                 }
                 catch (Exception e)
                 {
