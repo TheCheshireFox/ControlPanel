@@ -7,15 +7,14 @@ namespace ControlPanel.Bridge.Transport;
 
 public sealed class SerialPortConnector(IOptions<TransportOptions> options) : IStreamConnector
 {
-    private readonly string _device = options.Value.Tty;
-    private readonly int _baud = options.Value.BaudRate;
+    private readonly TransportOptions _options = options.Value;
 
     public Task<StreamConnection> ConnectAsync(CancellationToken cancellationToken)
     {
         SerialPort? port = null;
         try
         {
-            port = new SerialPort(_device, _baud)
+            port = new SerialPort(_options.Tty, _options.BaudRate)
             {
                 Parity = Parity.None,
                 DataBits = 8,
@@ -26,8 +25,8 @@ public sealed class SerialPortConnector(IOptions<TransportOptions> options) : IS
                 WriteTimeout = -1,
                 ReadBufferSize = 8192,
                 WriteBufferSize = 8192,
-                DtrEnable = true,
-                RtsEnable = true
+                DtrEnable = _options.FlowControl,
+                RtsEnable = _options.FlowControl
             };
 
             port.Open();
