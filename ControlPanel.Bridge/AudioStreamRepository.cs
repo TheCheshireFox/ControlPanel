@@ -203,7 +203,9 @@ public class AudioStreamRepository : IAudioStreamRepository
     private static List<AudioStreamInfo> RemoveAgentStreams(Dictionary<string,AudioStreamInfo> currentAgentStreams, Dictionary<string, AgentAudioStream> bridgeAudioStreams)
     {
         var removed = new List<AudioStreamInfo>();
-        var removedIds = currentAgentStreams.Keys.Where(x => !bridgeAudioStreams.ContainsKey(x));
+        var removedIds = currentAgentStreams.Keys
+            .Where(x => !bridgeAudioStreams.ContainsKey(x))
+            .ToArray();
         
         foreach (var id in removedIds)
         {

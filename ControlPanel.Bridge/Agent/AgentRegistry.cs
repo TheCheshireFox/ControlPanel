@@ -22,8 +22,9 @@ public class AgentRegistry(IAudioStreamRepository audioStreamRepository) : IAgen
 
     public async Task RemoveAsync(IAgentConnection connection, CancellationToken cancellationToken)
     {
-        _agents.TryRemove(connection.AgentId, out _);
-        await audioStreamRepository.ClearAsync(connection.AgentId, cancellationToken);
+        var removed = _agents.TryRemove(new KeyValuePair<string, IAgentConnection>(connection.AgentId, connection));
+        if (removed)
+            await audioStreamRepository.ClearAsync(connection.AgentId, cancellationToken);
     }
 
     public async Task<bool> TrySendAsync(string agentId, AgentMessage message, CancellationToken cancellationToken)

@@ -79,7 +79,7 @@ public sealed class FramedByteChannel(
             if (pendingBytes.Length < maxStreamSize)
                 continue;
 
-            pendingBytes.ShrinkTo((int)pendingBytes.Length - readOffset);
+            pendingBytes.DiscardPrefix(readOffset);
             readOffset = 0;
         }
     }
@@ -105,7 +105,7 @@ public sealed class FramedByteChannel(
             catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
             {
                 logger.LogWarning(ex, "Device stream error.");
-                Disconnect(cancellationToken);
+                Disconnect();
             }
         }
 
@@ -148,11 +148,9 @@ public sealed class FramedByteChannel(
         }
     }
 
-    private void Disconnect(CancellationToken cancellationToken)
+    private void Disconnect()
     {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, cancellationToken);
-
-        using (_connectionLock.Lock(cts.Token))
+        using (_connectionLock.Lock(_cts.Token))
         {
             _connection?.Dispose();
             _connection = null;

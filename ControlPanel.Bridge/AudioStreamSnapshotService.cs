@@ -38,6 +38,10 @@ public class AudioStreamSnapshotService(
         {
             await deviceConnection.SendMessageAsync(msg, cancellationToken);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // NOP
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error while sending streams");

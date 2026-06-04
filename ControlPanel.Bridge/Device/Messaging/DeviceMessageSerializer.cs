@@ -11,6 +11,7 @@ public static class DeviceMessageSerializer
         [MessageType.SetVolume] = typeof(SetVolumeDeviceMessage),
         [MessageType.SetMute] = typeof(SetMuteDeviceMessage),
         [MessageType.GetIcon] = typeof(GetIconDeviceMessage),
+        [MessageType.Icon] = typeof(IconDeviceMessage),
         [MessageType.RequestRefresh] = typeof(RequestRefreshDeviceMessage)
     };
     
@@ -20,7 +21,7 @@ public static class DeviceMessageSerializer
         var messageType = (MessageType)message["type"];
 
         if (!_types.TryGetValue(messageType, out var type))
-            throw new Exception($"Unable to deserialize unknown message {type}");
+            throw new Exception($"Unable to deserialize unknown message {messageType}");
 
         return (DeviceMessage?)MessagePackSerializer.Deserialize(type, data)
             ?? throw new Exception($"Unable to deserialize message {messageType}");
@@ -28,6 +29,9 @@ public static class DeviceMessageSerializer
 
     public static byte[] Serialize(DeviceMessage message)
     {
-        return MessagePackSerializer.Serialize(_types[message.Type], message);
+        if (!_types.TryGetValue(message.Type, out var type))
+            throw new Exception($"Unable to serialize unknown message {message.Type}");
+
+        return MessagePackSerializer.Serialize(type, message);
     }
 }

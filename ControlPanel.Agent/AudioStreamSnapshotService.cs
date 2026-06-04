@@ -1,4 +1,4 @@
-using ControlPanel.Agent.Extensions;
+using ControlPanel.Agent.Messaging;
 using ControlPanel.Agent.Shared;
 using ControlPanel.Protocol;
 using ControlPanel.WebSocket;
@@ -25,7 +25,7 @@ public class AudioStreamSnapshotService(IWebSocket ws, IAudioAgent audioAgent) :
 
             var streams = await audioAgent.GetAudioStreamsAsync(cancellationToken);
             var msg = new StreamsMessage(streams.Select(x => new AgentAudioStream(x.Id, x.Source, x.Name, x.Mute, x.Volume)).ToArray());
-            await ws.SendJsonAsync(msg, cancellationToken);
+            await ws.SendAsync(AgentMessageSerializer.Serialize(msg), cancellationToken);
         }
     }
 }

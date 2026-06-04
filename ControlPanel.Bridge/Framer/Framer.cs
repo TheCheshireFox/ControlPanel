@@ -17,6 +17,9 @@ public sealed class Framer(byte[] magic, ILogger logger)
 
     public byte[] ToBytes(ReadOnlyMemory<byte> data)
     {
+        if (data.Length > ushort.MaxValue)
+            throw new ArgumentOutOfRangeException(nameof(data), data.Length, "Frame payload is too large.");
+
         logger.LogDebug("Frame to bytes, size={Size}", data.Length);
 
         using var stream = new MemoryStream(new byte[GetFrameSize(data.Length)]);

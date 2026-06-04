@@ -28,6 +28,9 @@ public static class AgentMessageSerializer
 
     public static string Serialize(AgentMessage message)
     {
-        return JsonSerializer.Serialize(message, _types[message.Type]);
+        if (!_types.TryGetValue(message.Type, out var type))
+            throw new Exception($"Unable to serialize unknown message {message.Type}");
+
+        return JsonSerializer.Serialize(message, type);
     }
 }

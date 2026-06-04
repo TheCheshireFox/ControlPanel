@@ -8,6 +8,7 @@ public sealed class WebSocket : IWebSocket
 {
     private readonly System.Net.WebSockets.WebSocket _webSocket;
     private readonly Func<Uri, CancellationToken, Task> _connect;
+    private readonly SemaphoreSlim _sendLock = new(1, 1);
 
     public bool Connected => _webSocket.State == WebSocketState.Open;
     
@@ -27,7 +28,15 @@ public sealed class WebSocket : IWebSocket
     
     public async Task SendAsync(string message, CancellationToken cancellationToken)
     {
-        await _webSocket.SendAsync(Encoding.UTF8.GetBytes(message), WebSocketMessageType.Text, true, cancellationToken);
+        await _sendLock.WaitAsync(cancellationToken);
+        try
+        {
+            await _webSocket.SendAsync(Encoding.UTF8.GetBytes(message), WebSocketMessageType.Text, true, cancellationToken);
+        }
+        finally
+        {
+            _sendLock.Release();
+        }
     }
 
     public async IAsyncEnumerable<string> ReceiveAsync([EnumeratorCancellation] CancellationToken cancellationToken)
@@ -65,5 +74,9 @@ public sealed class WebSocket : IWebSocket
         }
     }
 
-    public void Dispose() => _webSocket.Dispose();
+    public void Dispose()
+    {
+        _webSocket.Dispose();
+        _sendLock.Dispose();
+    }
 }

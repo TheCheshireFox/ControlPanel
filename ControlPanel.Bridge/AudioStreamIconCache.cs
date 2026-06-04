@@ -9,7 +9,7 @@ public interface IAudioStreamIconCache
     bool TryGetIcon(string source, string agentId, out AudioCacheIcon icon);
     void AddIcon(string source, string agentId, AudioCacheIcon icon);
     void RemoveIcons(string agentId);
-    void RemoveIcon(string agentId, string source);
+    void RemoveIcon(string source, string agentId);
 }
 
 public record AudioCacheIcon(int Size, byte[] Icon);
@@ -37,7 +37,7 @@ public class AudioStreamIconCache(IOptions<AudioStreamIconCacheOptions> options)
         }
     }
 
-    public void RemoveIcon(string agentId, string source)
+    public void RemoveIcon(string source, string agentId)
     {
         _iconCache.Remove((source, agentId));
     }

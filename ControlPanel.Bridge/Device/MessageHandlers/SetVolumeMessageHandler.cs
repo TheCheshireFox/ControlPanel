@@ -7,7 +7,7 @@ namespace ControlPanel.Bridge.DeviceMessageHandlers;
 
 public class SetVolumeMessageHandler(
     IAgentRegistry agents,
-    ILogger<SetMuteMessageHandler> logger) : INotificationHandler<SetVolumeDeviceMessage>
+    ILogger<SetVolumeMessageHandler> logger) : INotificationHandler<SetVolumeDeviceMessage>
 {
     public async ValueTask Handle(SetVolumeDeviceMessage deviceMessage, CancellationToken cancellationToken)
     {

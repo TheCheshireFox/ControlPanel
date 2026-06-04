@@ -87,7 +87,7 @@ public class AgentService(
             {
                 await Task.WhenAll(tasks);
             }
-            catch (Exception) when (connectionCts.IsCancellationRequested)
+            catch (OperationCanceledException) when (connectionCts.IsCancellationRequested)
             {
                 // NOP
             }
