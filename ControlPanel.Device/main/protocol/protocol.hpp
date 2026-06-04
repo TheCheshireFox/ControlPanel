@@ -1,11 +1,8 @@
 #pragma once
 
-#include <string>
-#include <vector>
-#include <span>
-#include <variant>
-#include <optional>
-#include <cstdint>
+#include "protocol/messages.hpp"
+
+#include <type_traits>
 
 #include "esp_log.h"
 #include "sdkconfig.h"
@@ -15,95 +12,40 @@
 #include "ArduinoJson.h"
 #include "utils/arduino_json_utils.hpp"
 
-enum class bridge_message_type_t : int8_t
-{
-    none = -1,
-    streams,
-    set_volume,
-    set_mute,
-    icon,
-    get_icon,
-    request_refresh
-};
 inline bool convertToJson(const bridge_message_type_t& type, JsonVariant dst) { return dst.set(static_cast<int8_t>(type)); }
 inline void convertFromJson(JsonVariantConst src, bridge_message_type_t& type) { type = static_cast<bridge_message_type_t>(src.as<int8_t>()); }
 
-template<bridge_message_type_t Type>
-struct bridge_message_base_t
-{
-    bridge_message_type_t type = Type;
-};
+template<typename T>
+concept has_model_traits = requires { model_traits<T>::fields(); };
 
-struct bridge_audio_stream_id_t
+template<has_model_traits T>
+void convertToJson(const T& src, JsonVariant dst)
 {
-    std::string id;
-    std::string agent_id;
-};
-SIMPLE_CONVERT_TO_JSON(bridge_audio_stream_id_t, id, agent_id);
-SIMPLE_CONVERT_FROM_JSON(bridge_audio_stream_id_t, id, agent_id);
+    if constexpr (requires { src.type; })
+        dst["type"] = src.type;
 
-struct bridge_audio_stream_t
+    std::apply([&](auto... field)
+    {
+        ((dst[field.name] = src.*field.member), ...);
+    }, model_traits<T>::fields());
+}
+
+template<has_model_traits T>
+void convertFromJson(JsonVariantConst src, T& dst)
 {
-    bridge_audio_stream_id_t id;
-    std::string source;
-    std::optional<std::string> name;
-    std::optional<bool> mute;
-    std::optional<float> volume;
-    std::optional<int32_t> icon_hash;
-};
-SIMPLE_CONVERT_FROM_JSON(bridge_audio_stream_t, id, source, name, mute, volume, icon_hash);
+    if constexpr (requires { dst.type; })
+        dst.type = src["type"].as<decltype(dst.type)>();
 
-struct streams_message_t : bridge_message_base_t<bridge_message_type_t::streams>
-{
-    std::vector<bridge_audio_stream_t> updated;
-    std::vector<bridge_audio_stream_id_t> deleted;
-};
-SIMPLE_CONVERT_FROM_JSON(streams_message_t, type, updated, deleted);
-
-struct icon_message_t : bridge_message_base_t<bridge_message_type_t::icon>
-{
-    std::string source;
-    std::string agent_id;
-    int32_t icon_hash;
-    int size;
-    std::span<const uint8_t> icon;
-};
-SIMPLE_CONVERT_FROM_JSON(icon_message_t, type, source, agent_id, icon_hash, size, icon);
-
-struct set_mute_message_t : bridge_message_base_t<bridge_message_type_t::set_mute>
-{
-    bridge_audio_stream_id_t id;
-    bool mute;
-};
-SIMPLE_CONVERT_TO_JSON(set_mute_message_t, type, id, mute);
-
-struct set_volume_message_t : bridge_message_base_t<bridge_message_type_t::set_volume>
-{
-    bridge_audio_stream_id_t id;
-    float volume;
-};
-SIMPLE_CONVERT_TO_JSON(set_volume_message_t, type, id, volume);
-
-struct get_icon_message_t : bridge_message_base_t<bridge_message_type_t::get_icon>
-{
-    std::string source;
-    std::string agent_id;
-    int32_t icon_hash;
-};
-SIMPLE_CONVERT_TO_JSON(get_icon_message_t, type, source, agent_id, icon_hash);
-
-struct request_refresh_message_t : bridge_message_base_t<bridge_message_type_t::request_refresh>
-{
-
-};
-SIMPLE_CONVERT_TO_JSON(request_refresh_message_t, type);
+    std::apply([&](auto... field)
+    {
+        ((dst.*(field.member) = src[field.name].template as<std::remove_cvref_t<decltype(dst.*field.member)>>()), ...);
+    }, model_traits<T>::fields());
+}
 
 namespace protocol
 {
     inline static constexpr char TAG[] = "MsgPack";
 }
-
-using bridge_message_t = std::variant<std::monostate, streams_message_t, icon_message_t>;
 
 inline bridge_message_t parse_bridge_message(std::span<const uint8_t> msg_data)
 {

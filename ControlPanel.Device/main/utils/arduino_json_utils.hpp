@@ -6,25 +6,6 @@
 
 #include "ArduinoJson.h"
 
-#define PARENS ()
-#define EXPAND(...) EXPAND_(EXPAND_(EXPAND_(EXPAND_(EXPAND_(EXPAND_(EXPAND_(EXPAND_(EXPAND_(__VA_ARGS__)))))))))
-#define EXPAND_(...) __VA_ARGS__
-#define FOR_EACH(macro, ...) __VA_OPT__(EXPAND(FOR_EACH_HELPER(macro, __VA_ARGS__)))
-#define FOR_EACH_HELPER(macro, a1, ...) macro(a1) __VA_OPT__(FOR_EACH_AGAIN PARENS (macro, __VA_ARGS__))
-#define FOR_EACH_AGAIN() FOR_EACH_HELPER
-
-#define _SCTJ_ASSIGN(m) dst[#m] = src.m;
-#define SIMPLE_CONVERT_TO_JSON(type, ...) void convertToJson(const type& src, JsonVariant dst)\
-{\
-    FOR_EACH(_SCTJ_ASSIGN, __VA_ARGS__)\
-}
-
-#define _SCFJ_ASSIGN(m) dst.m = src[#m].as<decltype(dst.m)>();
-#define SIMPLE_CONVERT_FROM_JSON(type, ...) void convertFromJson(JsonVariantConst src, type& dst) \
-{\
-    FOR_EACH(_SCFJ_ASSIGN, __VA_ARGS__)\
-}\
-
 namespace ArduinoJson
 {
     template<typename T>
@@ -59,6 +40,8 @@ namespace ArduinoJson
     {
         static std::span<const uint8_t> fromJson(JsonVariantConst src)
         {
+            assert(src.is<MsgPackBinary>());
+
             auto bin = src.as<MsgPackBinary>();
             return std::span{static_cast<const uint8_t*>(bin.data()), bin.size()};
         }
