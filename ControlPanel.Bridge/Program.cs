@@ -1,7 +1,6 @@
 using ControlPanel.Agent.Messaging;
 using ControlPanel.Bridge.Agent;
 using ControlPanel.Bridge.Device.DeviceProtocol;
-using ControlPanel.Bridge.Device.Messaging;
 using ControlPanel.Bridge.Framer;
 using ControlPanel.Bridge.Options;
 using ControlPanel.Bridge.Transport;
@@ -50,14 +49,10 @@ public class Program
         builder.Services.AddSingleton<IAudioStreamRepository, AudioStreamRepository>();
         builder.Services.AddSingleton<IAgentRegistry, AgentRegistry>();
         builder.Services.AddSingleton<IAgentAppIconProvider, AgentAppIconProvider>(_ => new AgentAppIconProvider(32, 10));
-        builder.Services.AddSingleton<IDeviceConnection, DeviceConnection>();
         builder.Services.AddSingleton<IAudioStreamIconCache, AudioStreamIconCache>();
-        builder.Services.AddSingleton<IFrameTransport, FrameTransport>();
-        builder.Services.AddSingleton<IFrameProtocol, FrameProtocol>();
-
-        builder.Services.AddSingleton<ITransportStreamProvider, SerialPortTransportStreamProvider>();
         
         AddMediator(builder.Services);
+        AddDeviceTransport(builder.Services);
         AddDeviceMessaging(builder.Services);
         AddAgentMessaging(builder.Services);
 
@@ -76,11 +71,20 @@ public class Program
             options.Assemblies = [typeof(Program)];
         });
     }
+
+    private static void AddDeviceTransport(IServiceCollection services)
+    {
+        services.AddSingleton<IStreamConnector, SerialPortConnector>();
+        services.AddSingleton<IFrameChannel, FramedByteChannel>();
+        services.AddSingleton<DeviceMessageChannel>();
+        services.AddSingleton<IDeviceConnection>(sp => sp.GetRequiredService<DeviceMessageChannel>());
+        services.AddScoped<IMessageTransport<DeviceMessage>>(sp => sp.GetRequiredService<DeviceMessageChannel>());
+    }
     
     private static void AddDeviceMessaging(IServiceCollection services)
     {
         services
-            .AddMessaging<DeviceMessage>(x => x.WithTransport<DeviceMessageTransport>())
+            .AddMessaging<DeviceMessage>()
             .AddHostedMessaging<DeviceMessage>();
     }
     

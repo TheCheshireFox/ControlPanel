@@ -17,6 +17,11 @@ public static class ServiceCollectionExtensions
 {
     extension(IServiceCollection services)
     {
+        public IServiceCollection AddMessaging<TMessage>()
+        {
+            return services.AddMessaging<TMessage>(_ => { });
+        }
+
         public IServiceCollection AddMessaging<TMessage>(
             Action<MessagingBuilder<TMessage>> configure)
         {

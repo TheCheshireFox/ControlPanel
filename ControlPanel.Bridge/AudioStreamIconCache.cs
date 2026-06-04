@@ -14,20 +14,13 @@ public interface IAudioStreamIconCache
 
 public record AudioCacheIcon(int Size, byte[] Icon);
 
-public class AudioStreamIconCache : IAudioStreamIconCache
+public class AudioStreamIconCache(IOptions<AudioStreamIconCacheOptions> options) : IAudioStreamIconCache
 {
-    private readonly TimeSpan _cacheExpiry;
-    private readonly MemoryCache _iconCache;
-
-    public AudioStreamIconCache(IOptions<AudioStreamIconCacheOptions> options)
+    private readonly TimeSpan _cacheExpiry = options.Value.CacheExpiry;
+    private readonly MemoryCache _iconCache = new(new MemoryCacheOptions
     {
-        _iconCache = new MemoryCache(new MemoryCacheOptions
-        {
-            SizeLimit = options.Value.CacheSizeKb * 1024
-        });
-
-        _cacheExpiry = options.Value.CacheExpiry;
-    }
+        SizeLimit = options.Value.CacheSizeKb * 1024
+    });
 
     public bool TryGetIcon(string source, string agentId, out AudioCacheIcon icon)
         => _iconCache.TryGetValue((source, agentId), out icon!);
