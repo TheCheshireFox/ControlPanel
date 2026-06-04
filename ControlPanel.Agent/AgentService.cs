@@ -31,25 +31,12 @@ public class AgentService(
 
             try
             {
-                logger.LogInformation("connecting to {Uri}", _bridgeUri);
-                await ws.ConnectAsync(_bridgeUri, stoppingToken);
-                logger.LogInformation("connected");
-
-                using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-
-                await using var scope = serviceProvider.CreateAsyncScope();
-                scope.ServiceProvider.SetScopedProxy(ws);
-                
-                var messageService = scope.ServiceProvider.GetRequiredService<IMessageService<AgentMessage>>();
-                var snapshotService = scope.ServiceProvider.GetRequiredService<IAudioStreamSnapshotService>();
-
-                await SendAgentInitMessageAsync(ws, linkedCts.Token);
-                await RunTasksAsync([
-                    messageService.RunAsync(linkedCts.Token),
-                    snapshotService.RunAsync(linkedCts.Token)
-                ], linkedCts);
-
+                await RunConnectionAsync(ws, stoppingToken);
                 logger.LogInformation("connection ended");
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
             }
             catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
             {
@@ -66,11 +53,45 @@ public class AgentService(
         logger.LogInformation("stopped");
     }
 
-    private static async Task RunTasksAsync(Task[] tasks, CancellationTokenSource cts)
+    private async Task RunConnectionAsync(IWebSocket ws, CancellationToken cancellationToken)
     {
-        await Task.WhenAny(tasks);
-        await cts.CancelAsync();
-        await Task.WhenAll(tasks);
+        logger.LogInformation("connecting to {Uri}", _bridgeUri);
+        await ws.ConnectAsync(_bridgeUri, cancellationToken);
+        logger.LogInformation("connected");
+
+        await using var scope = serviceProvider.CreateAsyncScope();
+        scope.ServiceProvider.SetScopedProxy(ws);
+
+        var messageService = scope.ServiceProvider.GetRequiredService<IMessageService<AgentMessage>>();
+        var snapshotService = scope.ServiceProvider.GetRequiredService<IAudioStreamSnapshotService>();
+
+        using var connectionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        await SendAgentInitMessageAsync(ws, connectionCts.Token);
+
+        var tasks = new[]
+        {
+            messageService.RunAsync(connectionCts.Token),
+            snapshotService.RunAsync(connectionCts.Token)
+        };
+        
+        try
+        {
+            await await Task.WhenAny(tasks);
+        }
+        finally
+        {
+            await connectionCts.CancelAsync();
+
+            try
+            {
+                await Task.WhenAll(tasks);
+            }
+            catch (Exception) when (connectionCts.IsCancellationRequested)
+            {
+                // NOP
+            }
+        }
     }
     
     private async Task SendAgentInitMessageAsync(IWebSocket ws, CancellationToken cancellationToken)

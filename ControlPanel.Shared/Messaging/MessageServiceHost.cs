@@ -8,6 +8,7 @@ public class MessageServiceHost<TMessage>(
     IServiceScopeFactory scopeFactory,
     ILogger<MessageServiceHost<TMessage>> logger)
     : BackgroundService
+    where TMessage : notnull
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
