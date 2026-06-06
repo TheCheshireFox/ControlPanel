@@ -9,4 +9,6 @@ ControlPanel.Device/.vscode/
 ControlPanel.Device/dependencies.lock
 ControlPanel.Device/build/
 ControlPanel.Device/main/build/
+ControlPanel.Device/main/test/build/
+ControlPanel.Device/test/build/
 ControlPanel.Device/managed_components/

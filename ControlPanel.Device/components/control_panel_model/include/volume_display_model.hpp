@@ -221,7 +221,12 @@ private:
             return;
         }
 
-        display_update_item_t update{id};
+        display_update_item_t update{
+            .id = id,
+            .title = std::nullopt,
+            .volume = std::nullopt,
+            .mute = std::nullopt
+        };
         if (stream.name.has_value()) update.title = stream.name;
         if (stream.mute.has_value()) update.mute = stream.mute;
         if (stream.volume.has_value()) update.volume = to_volume_percent(*stream.volume);
