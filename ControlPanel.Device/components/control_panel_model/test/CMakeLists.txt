@@ -1,4 +1,5 @@
-idf_component_register(SRCS "test_volume_display_model.cpp"
+idf_component_register(
+        SRCS "test_volume_display_model.cpp" "test_protocol_fixtures.cpp"
         REQUIRES unity control_panel_model
         EMBED_FILES
         fixtures/bridge/streams.msgpack
