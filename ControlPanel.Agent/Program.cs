@@ -3,7 +3,7 @@ using ControlPanel.Agent.Messaging;
 using ControlPanel.Agent.Options;
 using ControlPanel.Agent.Shared;
 using ControlPanel.Agent.Windows;
-using ControlPanel.Protocol;
+using ControlPanel.AgentProtocol;
 using ControlPanel.Shared;
 using ControlPanel.Shared.Logging;
 using ControlPanel.Shared.Messaging;
@@ -46,7 +46,7 @@ public class Program
     private static void AddAgentServices(IServiceCollection services)
     {
         services.AddScopedProxy<IWebSocket>();
-        services.AddScoped<IAudioStreamSnapshotService>();
+        services.AddScoped<IAudioStreamSnapshotService, AudioStreamSnapshotService>();
         services.AddSingleton<IWebSocketFactory, WebSocketFactory>();
     }
     
@@ -55,7 +55,7 @@ public class Program
         services.AddMediator(options =>
         {
             options.ServiceLifetime = ServiceLifetime.Scoped;
-            options.Assemblies = [typeof(Program)];
+            options.Assemblies = [typeof(Program), typeof(AgentMessage)];
         });
         services.AddMessaging<AgentMessage>()
             .WithTransport<AgentMessageTransport>();

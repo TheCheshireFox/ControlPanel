@@ -1,4 +1,4 @@
-using ControlPanel.Protocol;
+using ControlPanel.AgentProtocol;
 
 namespace ControlPanel.Bridge.Audio;
 

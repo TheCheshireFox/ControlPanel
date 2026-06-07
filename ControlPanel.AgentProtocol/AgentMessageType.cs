@@ -1,4 +1,4 @@
-namespace ControlPanel.Protocol;
+namespace ControlPanel.AgentProtocol;
 
 public enum AgentMessageType
 {

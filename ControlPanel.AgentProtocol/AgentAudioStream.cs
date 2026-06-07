@@ -1,3 +1,3 @@
-namespace ControlPanel.Protocol;
+namespace ControlPanel.AgentProtocol;
 
 public record AgentAudioStream(string Id, string Source, string Name, bool Mute, double Volume, int IconHash);

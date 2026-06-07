@@ -1,6 +1,6 @@
 using Mediator;
 
-namespace ControlPanel.Protocol;
+namespace ControlPanel.AgentProtocol;
 
 public record InitAgentMessage(byte[] AgentIcon)
     : AgentMessage(AgentMessageType.AgentInit), INotification;

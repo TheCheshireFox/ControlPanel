@@ -1,4 +1,4 @@
-using ControlPanel.Protocol;
+using ControlPanel.AgentProtocol;
 using Mediator;
 
 namespace ControlPanel.Bridge.Agent.MessageHandlers;

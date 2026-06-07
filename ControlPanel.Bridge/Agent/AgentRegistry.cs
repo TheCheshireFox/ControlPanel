@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
+using ControlPanel.AgentProtocol;
 using ControlPanel.Bridge.Audio;
-using ControlPanel.Protocol;
 
 namespace ControlPanel.Bridge.Agent;
 

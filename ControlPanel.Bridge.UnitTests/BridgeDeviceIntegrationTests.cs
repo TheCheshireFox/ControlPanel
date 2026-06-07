@@ -1,12 +1,12 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
+using ControlPanel.AgentProtocol;
 using ControlPanel.Bridge.Agent;
 using ControlPanel.Bridge.Audio;
 using ControlPanel.Bridge.Device.DeviceProtocol;
 using ControlPanel.Bridge.Device.Messaging;
 using ControlPanel.Bridge.Framer;
 using ControlPanel.Bridge.Options;
-using ControlPanel.Protocol;
 using ControlPanel.Shared.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -177,7 +177,6 @@ public class BridgeDeviceIntegrationTests
             services.AddSingleton<IAudioStreamRepository, AudioStreamRepository>();
             services.AddSingleton<IAudioStreamIconCache, AudioStreamIconCache>();
             services.AddSingleton<IAgentRegistry>(agents);
-            services.AddSingleton<AudioStreamIncrementalSnapshotHandler>();
 
             return new BridgeHarness(services.BuildServiceProvider(), frames, agents);
         }

@@ -1,6 +1,6 @@
 using Mediator;
 
-namespace ControlPanel.Protocol;
+namespace ControlPanel.AgentProtocol;
 
 public record AudioStreamIconAgentMessage(string Source, byte[] Icon, int IconHash)
     : AgentMessage(AgentMessageType.Icon), INotification;

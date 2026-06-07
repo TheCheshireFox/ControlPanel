@@ -1,5 +1,5 @@
 using ControlPanel.Agent.Shared;
-using ControlPanel.Protocol;
+using ControlPanel.AgentProtocol;
 using Mediator;
 
 namespace ControlPanel.Agent.MessageHandlers;

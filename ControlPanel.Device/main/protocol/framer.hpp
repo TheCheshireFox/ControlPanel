@@ -17,7 +17,7 @@ namespace transport
 
         static constexpr magic_t magic = {0xAB, 0xBC};
 
-        bool try_insert_and_parse(std::span<const uint8_t> raw_data, std::span<const uint8_t>& frame_data)
+        bool try_insert(std::span<const uint8_t> raw_data)
         {
             if (!_frame_buffer.try_insert(raw_data))
             {
@@ -36,21 +36,10 @@ namespace transport
                 }
             }
 
-            return try_parse_frame(frame_data);
+            return true;
         }
 
-        static std::size_t get_frame_size(std::span<const uint8_t> data)
-        {
-            return magic.size() + sizeof(len_t) + data.size();
-        }
-
-        static constexpr std::size_t max_frame_size()
-        {
-            return magic.size() + sizeof(len_t) + std::numeric_limits<len_t>::max();
-        }
-
-    private:
-        bool try_parse_frame(std::span<const uint8_t>& frame_data)
+        bool try_parse_next(std::span<const uint8_t>& frame_data)
         {
             auto buffer_span = _frame_buffer.span();
             auto frame_span = _frame_buffer.find(magic);
@@ -81,6 +70,16 @@ namespace transport
             frame_data = {data->data(), data->size()};
             _frame_buffer.seek(frame_offset + magic.size() + reader.used_data().size());
             return true;
+        }
+
+        static std::size_t get_frame_size(std::span<const uint8_t> data)
+        {
+            return magic.size() + sizeof(len_t) + data.size();
+        }
+
+        static constexpr std::size_t max_frame_size()
+        {
+            return magic.size() + sizeof(len_t) + std::numeric_limits<len_t>::max();
         }
 
     private:

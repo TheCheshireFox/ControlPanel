@@ -1,5 +1,5 @@
 using ControlPanel.Agent.Messaging;
-using ControlPanel.Protocol;
+using ControlPanel.AgentProtocol;
 using ControlPanel.Shared.Messaging;
 using ControlPanel.WebSocket;
 

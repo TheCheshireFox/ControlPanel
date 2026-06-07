@@ -1,5 +1,5 @@
 using System.Text.Json;
-using ControlPanel.Protocol;
+using ControlPanel.AgentProtocol;
 
 namespace ControlPanel.Agent.Messaging;
 

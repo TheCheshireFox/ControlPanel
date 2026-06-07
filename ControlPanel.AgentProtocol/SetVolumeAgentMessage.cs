@@ -1,6 +1,6 @@
 using Mediator;
 
-namespace ControlPanel.Protocol;
+namespace ControlPanel.AgentProtocol;
 
 public record SetVolumeAgentMessage(string Id, double Volume)
     : AgentMessage(AgentMessageType.SetVolume), INotification;

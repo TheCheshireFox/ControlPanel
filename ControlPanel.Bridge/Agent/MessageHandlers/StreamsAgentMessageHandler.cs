@@ -1,7 +1,7 @@
 using System.Text.RegularExpressions;
+using ControlPanel.AgentProtocol;
 using ControlPanel.Bridge.Audio;
 using ControlPanel.Bridge.Options;
-using ControlPanel.Protocol;
 using Mediator;
 using Microsoft.Extensions.Options;
 

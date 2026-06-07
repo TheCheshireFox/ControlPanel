@@ -1,11 +1,11 @@
 using ControlPanel.Agent.Messaging;
+using ControlPanel.AgentProtocol;
 using ControlPanel.Bridge.Agent;
 using ControlPanel.Bridge.Audio;
 using ControlPanel.Bridge.Device.DeviceProtocol;
 using ControlPanel.Bridge.Framer;
 using ControlPanel.Bridge.Options;
 using ControlPanel.Bridge.Transport;
-using ControlPanel.Protocol;
 using ControlPanel.Shared;
 using ControlPanel.Shared.Logging;
 using ControlPanel.Shared.Messaging;
@@ -67,7 +67,7 @@ public class Program
         services.AddMediator(options =>
         {
             options.ServiceLifetime = ServiceLifetime.Scoped;
-            options.Assemblies = [typeof(Program)];
+            options.Assemblies = [typeof(Program), typeof(AgentMessage)];
         });
     }
 

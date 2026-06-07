@@ -1,6 +1,6 @@
+using ControlPanel.AgentProtocol;
 using ControlPanel.Bridge.Agent;
 using ControlPanel.Bridge.Device.DeviceProtocol;
-using ControlPanel.Protocol;
 using Mediator;
 
 namespace ControlPanel.Bridge.Device.MessageHandlers;

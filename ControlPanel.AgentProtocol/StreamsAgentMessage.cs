@@ -1,6 +1,6 @@
 using Mediator;
 
-namespace ControlPanel.Protocol;
+namespace ControlPanel.AgentProtocol;
 
 public record StreamsAgentMessage(AgentAudioStream[] Streams)
     : AgentMessage(AgentMessageType.Streams), INotification;

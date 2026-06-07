@@ -1,6 +1,6 @@
 using ControlPanel.Agent.Messaging;
 using ControlPanel.Agent.Shared;
-using ControlPanel.Protocol;
+using ControlPanel.AgentProtocol;
 using ControlPanel.WebSocket;
 
 namespace ControlPanel.Agent;

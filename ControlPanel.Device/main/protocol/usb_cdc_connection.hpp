@@ -95,11 +95,14 @@ namespace transport
                     return;
                 }
 
-                std::span<const uint8_t> frame_data;
-                if (!_framer.try_insert_and_parse({msg.buf, msg.len}, frame_data))
+                if (!_framer.try_insert({msg.buf, msg.len}))
                     continue;
 
-                if (_on_data_received)
+                if (!_on_data_received)
+                    continue;
+
+                std::span<const uint8_t> frame_data;
+                while (_framer.try_parse_next(frame_data))
                     _on_data_received(frame_data);
             }
         }

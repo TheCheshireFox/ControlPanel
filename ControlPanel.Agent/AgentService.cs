@@ -1,7 +1,7 @@
 using ControlPanel.Agent.Messaging;
 using ControlPanel.Agent.Options;
 using ControlPanel.Agent.Shared;
-using ControlPanel.Protocol;
+using ControlPanel.AgentProtocol;
 using ControlPanel.Shared;
 using ControlPanel.Shared.Messaging;
 using ControlPanel.WebSocket;
