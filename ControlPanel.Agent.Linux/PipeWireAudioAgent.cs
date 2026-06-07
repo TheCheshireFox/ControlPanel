@@ -5,7 +5,6 @@ using System.Text.Json.Serialization;
 using ControlPanel.Agent.Shared;
 using ControlPanel.Shared;
 using ControlPanel.Shared.Extensions;
-using Microsoft.Extensions.Caching.Memory;
 
 namespace ControlPanel.Agent.Linux;
 
@@ -32,21 +31,10 @@ internal static class DictionaryExtension
         => props.TryGetValue(key, out var jsonValue) && jsonValue.TryGetValue<T>(out var value) ? value :  defaultValue;
 }
 
-internal class PipeWireAudioAgent : IAudioAgent, IDisposable
+internal class PipeWireAudioAgent(IIconLocator iconLocator) : IAudioAgent, IDisposable
 {
-    private static readonly TimeSpan IconCacheSlidingExpiration = TimeSpan.FromHours(6);
-
-    private readonly IIconLocator _iconLocator;
-    private readonly MemoryCache _iconCache = new(new MemoryCacheOptions
-    {
-        SizeLimit = 4 * 1024 * 1024
-    });
-
-    public PipeWireAudioAgent(IIconLocator iconLocator)
-    {
-        _iconLocator = iconLocator;
-    }
-
+    private readonly AudioStreamIconCache _iconCache = new(TimeSpan.FromHours(1), 4 * 1024 * 1024);
+    
     public Task<AudioAgentDescription> GetAudioAgentDescription()
     {
         return Task.FromResult(new AudioAgentDescription(
@@ -70,7 +58,7 @@ internal class PipeWireAudioAgent : IAudioAgent, IDisposable
             var info = node.Info!;
             var props = node.Info!.Params!.Props![0];
             var source = GetBinaryName(info.Props);
-            var icon = await GetCachedIconAsync(source, cancellationToken);
+            var icon = await GetIconAsync(source, cancellationToken);
 
             streams.Add(new AudioStream(
                 Id: node.Id.ToString(),
@@ -96,26 +84,14 @@ internal class PipeWireAudioAgent : IAudioAgent, IDisposable
     }
 
     public async Task<AudioStreamIcon> GetAudioStreamIconAsync(string source, CancellationToken cancellationToken)
-        => await GetCachedIconAsync(source, cancellationToken);
+        => await GetIconAsync(source, cancellationToken);
 
-    private async Task<AudioStreamIcon> GetCachedIconAsync(string source, CancellationToken cancellationToken)
-    {
-        if (_iconCache.TryGetValue<AudioStreamIcon>(source, out var cached) && cached != null)
-            return cached;
-
-        var icon = await LoadIconAsync(source, cancellationToken);
-        _iconCache.Set(source, icon, new MemoryCacheEntryOptions
-        {
-            SlidingExpiration = IconCacheSlidingExpiration,
-            Size = Math.Max(icon.Icon.Length, 1)
-        });
-
-        return icon;
-    }
+    private async Task<AudioStreamIcon> GetIconAsync(string source, CancellationToken cancellationToken)
+        => await _iconCache.GetOrAddAsync(source, ct => LoadIconAsync(source, ct), cancellationToken);
 
     private async Task<AudioStreamIcon> LoadIconAsync(string source, CancellationToken cancellationToken)
     {
-        var iconPath = _iconLocator.FindIcon(source);
+        var iconPath = iconLocator.FindIcon(source);
         
         return string.IsNullOrEmpty(iconPath)
             ? AudioStreamIcon.Default
@@ -142,7 +118,7 @@ internal class PipeWireAudioAgent : IAudioAgent, IDisposable
         return nodes;
     }
     
-    private static bool IsGenericName(string? mediaName, string? appName, string? nodeDesc, string? nodeName)
+    private static bool IsGenericName(string? mediaName, string? appName, string? nodeDesc)
     {
         if (string.IsNullOrWhiteSpace(mediaName))
             return true;
@@ -175,7 +151,7 @@ internal class PipeWireAudioAgent : IAudioAgent, IDisposable
         var nodeDesc = props.GetProperty<string>("node.description");
         var nodeName = props.GetProperty<string>("node.name");
 
-        if (!IsGenericName(mediaName, appName, nodeDesc, nodeName))
+        if (!IsGenericName(mediaName, appName, nodeDesc))
         {
             return !string.IsNullOrWhiteSpace(appName)
                 ? $"{appName}: {mediaName}"

@@ -18,22 +18,12 @@ public static class ServiceCollectionExtensions
 {
     extension(IServiceCollection services)
     {
-        public IServiceCollection AddMessaging<TMessage>()
-            where TMessage : notnull
-        {
-            return services.AddMessaging<TMessage>(_ => { });
-        }
-
-        public IServiceCollection AddMessaging<TMessage>(
-            Action<MessagingBuilder<TMessage>> configure)
+        public MessagingBuilder<TMessage> AddMessaging<TMessage>()
             where TMessage : notnull
         {
             services.AddScoped<IMessageService<TMessage>, MessageService<TMessage>>();
 
-            var builder = new MessagingBuilder<TMessage>(services);
-            configure(builder);
-
-            return services;
+            return new MessagingBuilder<TMessage>(services);
         }
 
         public IServiceCollection AddHostedMessaging<TMessage>()

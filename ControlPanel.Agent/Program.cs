@@ -57,7 +57,8 @@ public class Program
             options.ServiceLifetime = ServiceLifetime.Scoped;
             options.Assemblies = [typeof(Program)];
         });
-        services.AddMessaging<AgentMessage>(x => x.WithTransport<AgentMessageTransport>());
+        services.AddMessaging<AgentMessage>()
+            .WithTransport<AgentMessageTransport>();
     }
     
     private static IAudioAgentHost CreateAudioAgentHost()

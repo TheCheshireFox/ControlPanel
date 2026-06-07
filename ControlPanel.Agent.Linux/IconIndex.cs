@@ -2,7 +2,7 @@ using System.Text.RegularExpressions;
 
 namespace ControlPanel.Agent.Linux;
 
-internal partial class IconIndex
+internal partial class IconIndex(string[] themes, int iconSize)
 {
     private record IconInfo(int Size, string Extension, string Theme, string Path);
     
@@ -10,16 +10,8 @@ internal partial class IconIndex
     private static readonly Regex _sizeRegex = SizeRegex();
     
     private static readonly string[] _iconSearchPaths = GetIconSearchPaths();
-    
-    private readonly string[] _themes;
-    private readonly int _iconSize;
-    private readonly Dictionary<string, List<IconInfo>> _index = new();
 
-    public IconIndex(string[] themes, int iconSize)
-    {
-        _themes = themes;
-        _iconSize = iconSize;
-    }
+    private readonly Dictionary<string, List<IconInfo>> _index = new();
 
     public void Refresh()
     {
@@ -27,7 +19,7 @@ internal partial class IconIndex
         
         foreach (var searchPath in _iconSearchPaths)
         {
-            foreach (var theme in _themes)
+            foreach (var theme in themes)
             {
                 var themePath = Path.Combine(searchPath, theme);
                 if (!Directory.Exists(themePath))
@@ -63,7 +55,7 @@ internal partial class IconIndex
 
     public bool TryResolveIcon(string iconName, out string iconPath)
     {
-        foreach (var theme in _themes)
+        foreach (var theme in themes)
         {
             if (TryResolveIconByTheme(iconName, theme, out iconPath))
                 return true;
@@ -99,7 +91,7 @@ internal partial class IconIndex
 
     private string? FindSizedIcon(List<IconInfo> sortedIcons)
     {
-        var icon = sortedIcons.Find(x => x.Size >= _iconSize);
+        var icon = sortedIcons.Find(x => x.Size >= iconSize);
         return icon?.Path ?? sortedIcons.LastOrDefault()?.Path; 
     }
     
@@ -107,8 +99,11 @@ internal partial class IconIndex
     {
         var result = new LinkedList<string>();
         
-        var dataHome = Environment.GetEnvironmentVariable("XDG_DATA_HOME") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share");
-        var dataDirs = (Environment.GetEnvironmentVariable("XDG_DATA_DIRS") ?? "/usr/local/share:/usr/share").Split(':');
+        var dataHome = Environment.GetEnvironmentVariable("XDG_DATA_HOME")
+                       ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "share");
+        
+        var dataDirs = (Environment.GetEnvironmentVariable("XDG_DATA_DIRS")
+                        ?? "/usr/local/share:/usr/share").Split(':');
         
         foreach (var baseDir in new[] { dataHome }.Concat(dataDirs))
         {

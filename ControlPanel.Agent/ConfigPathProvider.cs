@@ -19,6 +19,6 @@ public static class ConfigPathProvider
         Path = System.IO.Path.Combine(appDir, FileName);
         
         if (!File.Exists(Path))
-            throw new Exception($"Config file not found in path: {Path}");
+            File.WriteAllText(Path, "{}");
     }
 }

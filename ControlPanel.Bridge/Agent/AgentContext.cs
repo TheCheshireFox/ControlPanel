@@ -7,5 +7,5 @@ public interface IAgentContext
 
 public class AgentContext : IAgentContext
 {
-    public string AgentId { get; set; } = string.Empty;
+    public required string AgentId { get; init; } = string.Empty;
 }

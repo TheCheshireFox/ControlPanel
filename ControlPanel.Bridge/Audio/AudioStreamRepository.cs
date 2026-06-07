@@ -1,74 +1,22 @@
-using System.Diagnostics.CodeAnalysis;
-using ControlPanel.Bridge.Extensions;
 using ControlPanel.Protocol;
+using Mediator;
 
-namespace ControlPanel.Bridge;
-
-public class Comparer
-{
-    private static class ValueComparer<T>
-    {
-        public static IEqualityComparer<T> Instance = EqualityComparer<T>.Default;
-    }
-
-    private class DelegateEqualityComparer<T>(Func<T?, T?, bool> comparer) : IEqualityComparer<T>
-    {
-        public bool Equals(T? x, T? y) => comparer(x, y);
-        public int GetHashCode([DisallowNull] T obj) => obj.GetHashCode();
-    }
-    
-    public Comparer WithEqualityComparer<T>(Func<T?, T?, bool> comparer)
-    {
-        ValueComparer<T>.Instance = new DelegateEqualityComparer<T>(comparer);
-        return this;
-    }
-    
-    public bool IsEquals<T>(T x, T y) => ValueComparer<T>.Instance.Equals(x, y);
-}
-
-public record AudioStreamId(string Id, string AgentId);
-
-public record AudioStreamInfo(AudioStreamId Id, string Source, string Name, bool Mute, double Volume, int IconHash)
-{
-    public static AudioStreamInfo FromStream(AudioStreamId streamId, AgentAudioStream stream)
-        => new(
-            streamId,
-            stream.Source,
-            stream.Name,
-            stream.Mute,
-            stream.Volume,
-            stream.IconHash
-        );
-}
-
-public record AudioStreamDiff(AudioStreamId Id, string Source, string? Name, bool? Mute, double? Volume, int? IconHash)
-{
-    public bool HasChanges => Name != null || Mute != null || Volume != null || IconHash != null;
-    
-    public static AudioStreamDiff FromStreamInfo(AudioStreamInfo streamInfo)
-        => new(streamInfo.Id, streamInfo.Source, streamInfo.Name, streamInfo.Mute, streamInfo.Volume, streamInfo.IconHash);
-}
-
-public record AudioStreamIncrementalSnapshot(AudioStreamDiff[] Updated, AudioStreamInfo[] Deleted);
+namespace ControlPanel.Bridge.Audio;
 
 public interface IAudioStreamRepository
 {
-    event Func<AudioStreamIncrementalSnapshot, CancellationToken, Task> OnSnapshotChangedAsync;
-    
     Task UpdateAsync(string agentId, IEnumerable<AgentAudioStream> streams, CancellationToken cancellationToken);
     Task ClearAsync(string agentId, CancellationToken cancellationToken);
     Task<AudioStreamInfo[]> GetAllAsync(CancellationToken cancellationToken);
 }
 
-public class AudioStreamRepository(ILogger<AudioStreamRepository> logger) : IAudioStreamRepository
+public class AudioStreamRepository(IMediator mediator) : IAudioStreamRepository
 {
     private static readonly Comparer _comparer = new Comparer()
         .WithEqualityComparer<double>((x, y) => Math.Abs(x - y) < 0.01);
 
     private readonly SemaphoreSlim _streamsLock = new(1, 1);
     private readonly Dictionary<string, Dictionary<string, AudioStreamInfo>> _streams = new();
-
-    public event Func<AudioStreamIncrementalSnapshot, CancellationToken, Task>? OnSnapshotChangedAsync;
 
     public async Task UpdateAsync(string agentId, IEnumerable<AgentAudioStream> streams, CancellationToken cancellationToken)
     {
@@ -96,19 +44,8 @@ public class AudioStreamRepository(ILogger<AudioStreamRepository> logger) : IAud
 
     private async Task NotifyChangedAsync(IReadOnlyCollection<AudioStreamDiff> changed, IReadOnlyCollection<AudioStreamInfo> removed, CancellationToken cancellationToken)
     {
-        if (OnSnapshotChangedAsync == null || (changed.Count == 0 && removed.Count == 0))
-            return;
-        
         var snapshot = new AudioStreamIncrementalSnapshot(changed.ToArray(), removed.ToArray());
-
-        try
-        {
-            await OnSnapshotChangedAsync.InvokeAllAsync(snapshot, cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
-        {
-            logger.LogError(ex, "Failed to notify about stream changes");
-        }
+        await mediator.Publish(snapshot, cancellationToken);
     }
     
     public async Task ClearAsync(string agentId, CancellationToken cancellationToken)

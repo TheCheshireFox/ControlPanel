@@ -29,7 +29,7 @@ public class MessageService<TMessage>(
             }
             catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
             {
-                logger.LogError(ex, "Error while processing message: {Type}", message?.GetType().Name ?? "<null>");
+                logger.LogError(ex, "Error while processing message: {Type}", message.GetType().Name);
             }
         }
     }

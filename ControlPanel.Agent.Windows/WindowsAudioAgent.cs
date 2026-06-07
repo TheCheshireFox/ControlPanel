@@ -87,9 +87,9 @@ internal sealed class WindowsAudioAgent : IAudioAgent, IDisposable
             {
                 await _idMapper.PruneAsync(_audioSessionProvider.Sessions.Select(x => x.Id), _cts.Token);
             }
-            catch (OperationCanceledException) when (!_cts.IsCancellationRequested)
+            catch (OperationCanceledException)
             {
-                // NOP
+                return;
             }
         }
     }

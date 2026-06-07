@@ -38,7 +38,7 @@ public class AgentService(
             {
                 break;
             }
-            catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
+            catch (Exception ex)
             {
                 logger.LogError(ex, "connection error");
             }
@@ -65,15 +65,24 @@ public class AgentService(
         var messageService = scope.ServiceProvider.GetRequiredService<IMessageService<AgentMessage>>();
         var snapshotService = scope.ServiceProvider.GetRequiredService<IAudioStreamSnapshotService>();
 
-        using var connectionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        await SendAgentInitMessageAsync(ws, connectionCts.Token);
+        await SendAgentInitMessageAsync(ws, cancellationToken);
+        await RunTaskGroupAsync([messageService.RunAsync, snapshotService.RunAsync], cts.Token);
+    }
+    
+    private async Task SendAgentInitMessageAsync(IWebSocket ws, CancellationToken cancellationToken)
+    {
+        var dsc = await audioAgent.GetAudioAgentDescription();
+        var msg = new InitAgentMessage(dsc.AgentIcon);
+        await ws.SendAsync(AgentMessageSerializer.Serialize(msg), cancellationToken);
+    }
 
-        var tasks = new[]
-        {
-            messageService.RunAsync(connectionCts.Token),
-            snapshotService.RunAsync(connectionCts.Token)
-        };
+    private static async Task RunTaskGroupAsync(Func<CancellationToken, Task>[] taskRunners, CancellationToken cancellationToken)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        var tasks = taskRunners.Select(f => f(cts.Token)).ToList();
         
         try
         {
@@ -81,23 +90,16 @@ public class AgentService(
         }
         finally
         {
-            await connectionCts.CancelAsync();
+            await cts.CancelAsync();
 
             try
             {
                 await Task.WhenAll(tasks);
             }
-            catch (OperationCanceledException) when (connectionCts.IsCancellationRequested)
+            catch (OperationCanceledException) when (cts.IsCancellationRequested)
             {
                 // NOP
             }
         }
-    }
-    
-    private async Task SendAgentInitMessageAsync(IWebSocket ws, CancellationToken cancellationToken)
-    {
-        var dsc = await audioAgent.GetAudioAgentDescription();
-        var msg = new AgentInitMessage(dsc.AgentIcon);
-        await ws.SendAsync(AgentMessageSerializer.Serialize(msg), cancellationToken);
     }
 }

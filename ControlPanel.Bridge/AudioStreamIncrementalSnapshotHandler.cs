@@ -1,35 +1,24 @@
+using ControlPanel.Bridge.Audio;
 using ControlPanel.Bridge.Device.DeviceProtocol;
 using ControlPanel.Bridge.Extensions;
+using Mediator;
 
 namespace ControlPanel.Bridge;
 
-public class AudioStreamSnapshotService(
+public class AudioStreamIncrementalSnapshotHandler(
     IDeviceConnection deviceConnection,
-    IAudioStreamRepository audioStreamRepository,
     IAudioStreamIconCache iconCache,
-    ILogger<AudioStreamSnapshotService> logger)
-    : IHostedService
+    ILogger<AudioStreamIncrementalSnapshotHandler> logger)
+    : INotificationHandler<AudioStreamIncrementalSnapshot>
 {
-    public Task StartAsync(CancellationToken cancellationToken)
+    public async ValueTask Handle(AudioStreamIncrementalSnapshot notification, CancellationToken cancellationToken)
     {
-        audioStreamRepository.OnSnapshotChangedAsync += OnStreamsUpdateAsync;
-        return Task.CompletedTask;
-    }
-
-    public Task StopAsync(CancellationToken cancellationToken)
-    {
-        audioStreamRepository.OnSnapshotChangedAsync -= OnStreamsUpdateAsync;
-        return Task.CompletedTask;
-    }
-    
-    private async Task OnStreamsUpdateAsync(AudioStreamIncrementalSnapshot snapshot, CancellationToken cancellationToken)
-    {
-        if (snapshot.Deleted.Length == 0 && snapshot.Updated.Length == 0)
+        if (notification.Deleted.Length == 0 && notification.Updated.Length == 0)
             return;
 
-        CleanupIconCache(snapshot);
+        CleanupIconCache(notification);
         
-        var (updated, deleted) = snapshot.ToDeviceAudioStreams();
+        var (updated, deleted) = notification.ToDeviceAudioStreams();
         var msg = new StreamsDeviceMessage(updated, deleted);
         
         logger.LogDebug("Sending streams, updated: {Updated}, deleted: {Deleted}", updated.Length, deleted.Length);

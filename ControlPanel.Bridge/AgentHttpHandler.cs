@@ -25,7 +25,7 @@ public class AgentHttpHandler
         logger.LogInformation("agent connected: {Id}", agentId);
 
         await using var scope = serviceProvider.CreateAsyncScope();
-        InitializeAgentContext(scope.ServiceProvider, agentId);
+        scope.ServiceProvider.SetScopedProxy<IAgentContext>(new AgentContext{ AgentId = agentId });
         
         AgentConnection? connection = null;
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(applicationLifetime.ApplicationStopping, context.RequestAborted);
@@ -51,11 +51,5 @@ public class AgentHttpHandler
             
             logger.LogInformation("agent disconnected: {Id}", agentId);
         }
-    }
-
-    private static void InitializeAgentContext(IServiceProvider serviceProvider, string agentId)
-    {
-        var context = (AgentContext)serviceProvider.GetRequiredService<IAgentContext>();
-        context.AgentId = agentId;
     }
 }

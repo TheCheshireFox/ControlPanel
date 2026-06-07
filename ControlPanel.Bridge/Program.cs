@@ -1,5 +1,6 @@
 using ControlPanel.Agent.Messaging;
 using ControlPanel.Bridge.Agent;
+using ControlPanel.Bridge.Audio;
 using ControlPanel.Bridge.Device.DeviceProtocol;
 using ControlPanel.Bridge.Framer;
 using ControlPanel.Bridge.Options;
@@ -45,20 +46,18 @@ public class Program
         builder.Services.Configure<AudioStreamIconCacheOptions>(builder.Configuration.GetSection("IconCache"));
         
         builder.Services.AddSingleton<IWebSocketFactory, WebSocketFactory>();
-        builder.Services.AddScopedProxy<IWebSocket>();
         builder.Services.AddSingleton<IAudioStreamRepository, AudioStreamRepository>();
         builder.Services.AddSingleton<IAgentRegistry, AgentRegistry>();
-        builder.Services.AddSingleton<IAgentAppIconProvider, AgentAppIconProvider>(_ => new AgentAppIconProvider(32, 10));
         builder.Services.AddSingleton<IAudioStreamIconCache, AudioStreamIconCache>();
+        
+        builder.Services.AddScopedProxy<IWebSocket>();
+        builder.Services.AddScopedProxy<IAgentContext>();
+        builder.Services.AddScoped<IAgentAppIconProvider, AgentAppIconProvider>(_ => new AgentAppIconProvider(32, 10));
         
         AddMediator(builder.Services);
         AddDeviceTransport(builder.Services);
         AddDeviceMessaging(builder.Services);
         AddAgentMessaging(builder.Services);
-
-        builder.Services.AddScoped<IAgentContext>(_ => new AgentContext());
-        
-        builder.Services.AddHostedService<AudioStreamSnapshotService>();
 
         return builder.Build();
     }
@@ -83,13 +82,13 @@ public class Program
     
     private static void AddDeviceMessaging(IServiceCollection services)
     {
-        services
-            .AddMessaging<DeviceMessage>()
-            .AddHostedMessaging<DeviceMessage>();
+        services.AddMessaging<DeviceMessage>();
+        services.AddHostedMessaging<DeviceMessage>();
     }
     
     private static void AddAgentMessaging(IServiceCollection services)
     {
-        services.AddMessaging<AgentMessage>(x => x.WithTransport<AgentMessageTransport>());
+        services.AddMessaging<AgentMessage>()
+            .WithTransport<AgentMessageTransport>();
     }
 }

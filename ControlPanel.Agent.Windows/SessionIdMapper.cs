@@ -3,21 +3,23 @@ namespace ControlPanel.Agent.Windows;
 internal class SessionIdMapper
 {
     private readonly SemaphoreSlim _lock = new(1, 1);
-    private readonly Dictionary<string, string> _mapToSession = [];
-    private readonly Dictionary<string, string> _sessionToMap = [];
+    private readonly Dictionary<long, string> _mapToSession = [];
+    private readonly Dictionary<string, long> _sessionToMap = [];
 
+    private long _nextId = 0;
+    
     public async Task<string> GetMappedIdAsync(string sessionId, CancellationToken cancellationToken)
     {
         await _lock.WaitAsync(cancellationToken);
         try
         {
             if (_sessionToMap.TryGetValue(sessionId, out var mappedId))
-                return mappedId;
+                return mappedId.ToString();
         
-            mappedId = _sessionToMap[sessionId] = Guid.NewGuid().ToString("N");
+            mappedId = _sessionToMap[sessionId] = _nextId++;
             _mapToSession.Add(mappedId, sessionId);
 
-            return mappedId;
+            return mappedId.ToString();
         }
         finally
         {
@@ -30,7 +32,9 @@ internal class SessionIdMapper
         await _lock.WaitAsync(cancellationToken);
         try
         {
-            return _mapToSession.GetValueOrDefault(mapId);
+            return long.TryParse(mapId, out var value)
+                ? _mapToSession.GetValueOrDefault(value)
+                : null;
         }
         finally
         {
@@ -43,7 +47,10 @@ internal class SessionIdMapper
         await _lock.WaitAsync(cancellationToken);
         try
         {
-            if (_mapToSession.Remove(mapId, out var sessionId))
+            if (!long.TryParse(mapId, out var value))
+                return;
+            
+            if (_mapToSession.Remove(value, out var sessionId))
                 _sessionToMap.Remove(sessionId);
         }
         finally

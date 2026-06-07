@@ -7,12 +7,12 @@ public static class AgentMessageSerializer
 {
     private static readonly Dictionary<AgentMessageType, Type> _types = new()
     {
-        [AgentMessageType.AgentInit] = typeof(AgentInitMessage),
-        [AgentMessageType.Streams] = typeof(StreamsMessage),
-        [AgentMessageType.SetVolume] = typeof(SetVolumeMessage),
-        [AgentMessageType.SetMute] = typeof(SetMuteMessage),
-        [AgentMessageType.GetIcon] = typeof(GetIconMessage),
-        [AgentMessageType.Icon] = typeof(AudioStreamIconMessage)
+        [AgentMessageType.AgentInit] = typeof(InitAgentMessage),
+        [AgentMessageType.Streams] = typeof(StreamsAgentMessage),
+        [AgentMessageType.SetVolume] = typeof(SetVolumeAgentMessage),
+        [AgentMessageType.SetMute] = typeof(SetMuteAgentMessage),
+        [AgentMessageType.GetIcon] = typeof(GetIconAgentMessage),
+        [AgentMessageType.Icon] = typeof(AudioStreamIconAgentMessage)
     };
     
     public static AgentMessage Deserialize(string rawMessage)

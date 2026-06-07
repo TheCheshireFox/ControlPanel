@@ -11,15 +11,9 @@ public interface IIconLocator
     AudioStreamIcon FindIcon(string exePath);
 }
 
-internal class IconLocator : IIconLocator
+internal class IconLocator(ILogger<IconLocator> logger) : IIconLocator
 {
-    private readonly ILogger<IconLocator> _logger;
     private readonly ConcurrentDictionary<string, AudioStreamIcon> _iconCache = new();
-
-    public IconLocator(ILogger<IconLocator> logger)
-    {
-        _logger = logger;
-    }
 
     public AudioStreamIcon FindIcon(string exePath)
     {
@@ -42,14 +36,14 @@ internal class IconLocator : IIconLocator
                 }
                 catch (Exception e)
                 {
-                    _logger.LogError(e, "Could not load icon {exePath}", path);
+                    logger.LogError(e, "Could not load icon {exePath}", path);
                     return AudioStreamIcon.Default;
                 }
             });
         }
         catch (Exception e)
         {
-            _logger.LogError(e, "Could not load icon {exePath}", exePath);
+            logger.LogError(e, "Could not load icon {exePath}", exePath);
             return AudioStreamIcon.Default;
         }
     }

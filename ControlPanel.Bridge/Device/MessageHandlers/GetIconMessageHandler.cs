@@ -3,7 +3,7 @@ using ControlPanel.Bridge.Device.DeviceProtocol;
 using ControlPanel.Protocol;
 using Mediator;
 
-namespace ControlPanel.Bridge.DeviceMessageHandlers;
+namespace ControlPanel.Bridge.Device.MessageHandlers;
 
 public class GetIconMessageHandler(
     IAgentRegistry agents,
@@ -18,7 +18,7 @@ public class GetIconMessageHandler(
         }
         else
         {
-            await agents.TrySendAsync(deviceMessage.AgentId, new GetIconMessage(deviceMessage.Source), cancellationToken);
+            await agents.TrySendAsync(deviceMessage.AgentId, new GetIconAgentMessage(deviceMessage.Source), cancellationToken);
         }
     }
 }

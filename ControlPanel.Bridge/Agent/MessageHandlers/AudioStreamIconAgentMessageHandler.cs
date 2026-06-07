@@ -4,20 +4,20 @@ using Mediator;
 
 namespace ControlPanel.Bridge.Agent.MessageHandlers;
 
-public class AudioStreamIconMessageHandler(
+public class AudioStreamIconAgentMessageHandler(
     IAudioStreamIconCache audioStreamIconCache,
     IAgentAppIconProvider agentAppIconProvider,
     IDeviceConnection deviceConnection,
     IAgentContext context,
-    ILogger<AudioStreamIconMessageHandler> logger) : INotificationHandler<AudioStreamIconMessage>
+    ILogger<AudioStreamIconAgentMessageHandler> logger) : INotificationHandler<AudioStreamIconAgentMessage>
 {
-    public async ValueTask Handle(AudioStreamIconMessage message, CancellationToken cancellationToken)
+    public async ValueTask Handle(AudioStreamIconAgentMessage agentMessage, CancellationToken cancellationToken)
     {
-        var (size, icon) = ToUartIcon(message);
-        await deviceConnection.SendMessageAsync(new IconDeviceMessage(message.Source, context.AgentId, message.IconHash, size, icon), cancellationToken);
+        var (size, icon) = ToUartIcon(agentMessage);
+        await deviceConnection.SendMessageAsync(new IconDeviceMessage(agentMessage.Source, context.AgentId, agentMessage.IconHash, size, icon), cancellationToken);
     }
 
-    private (int Size, byte[] Icon) ToUartIcon(AudioStreamIconMessage msg)
+    private (int Size, byte[] Icon) ToUartIcon(AudioStreamIconAgentMessage msg)
     {
         using var appImg = agentAppIconProvider.GetAgentAppIcon(msg.Icon);
         var icon = LvglImageConverter.ConvertToRgb565A8(appImg);

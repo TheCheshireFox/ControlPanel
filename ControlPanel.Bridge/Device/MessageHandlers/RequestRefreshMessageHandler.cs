@@ -1,8 +1,9 @@
+using ControlPanel.Bridge.Audio;
 using ControlPanel.Bridge.Device.DeviceProtocol;
 using ControlPanel.Bridge.Extensions;
 using Mediator;
 
-namespace ControlPanel.Bridge.DeviceMessageHandlers;
+namespace ControlPanel.Bridge.Device.MessageHandlers;
 
 public class RequestRefreshMessageHandler(
     IAudioStreamRepository audioStreamRepository,

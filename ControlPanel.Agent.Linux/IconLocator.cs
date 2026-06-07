@@ -78,8 +78,11 @@ internal class IconLocator : IIconLocator
 
     private static IEnumerable<string> GetApplicationPaths()
     {
-        var dataHome = Environment.GetEnvironmentVariable("XDG_DATA_HOME") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), ".local", "share");
-        var dataDirs = Environment.GetEnvironmentVariable("XDG_DATA_DIRS") ?? "/usr/local/share:/usr/share";
+        var dataHome = Environment.GetEnvironmentVariable("XDG_DATA_HOME")
+                       ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), ".local", "share");
+        
+        var dataDirs = Environment.GetEnvironmentVariable("XDG_DATA_DIRS")
+                       ?? "/usr/local/share:/usr/share";
 
         return dataDirs
             .Split(':', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)

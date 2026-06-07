@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 using ControlPanel.Bridge.Agent;
+using ControlPanel.Bridge.Audio;
 using ControlPanel.Bridge.Device.DeviceProtocol;
 using ControlPanel.Bridge.Device.Messaging;
 using ControlPanel.Bridge.Framer;
@@ -21,7 +22,6 @@ public class BridgeDeviceIntegrationTests
     public async Task RepositoryUpdate_SendsStreamsSnapshotToDevice()
     {
         await using var harness = BridgeHarness.Create();
-        await harness.StartSnapshotServiceAsync();
 
         var repository = harness.Services.GetRequiredService<IAudioStreamRepository>();
         await repository.UpdateAsync(AgentId, [CreateAgentStream("stream-1")], TestContext.CurrentContext.CancellationToken);
@@ -70,7 +70,7 @@ public class BridgeDeviceIntegrationTests
         await harness.StartDeviceMessagePumpAsync();
 
         await harness.Frames.SendFromDeviceAsync(new SetVolumeDeviceMessage(new DeviceAudioStreamId("stream-1", AgentId), 0.5f));
-        var message = await harness.AgentRegistry.ReadAsync<SetVolumeMessage>(AgentId);
+        var message = await harness.AgentRegistry.ReadAsync<SetVolumeAgentMessage>(AgentId);
 
         Assert.Multiple(() =>
         {
@@ -86,7 +86,7 @@ public class BridgeDeviceIntegrationTests
         await harness.StartDeviceMessagePumpAsync();
 
         await harness.Frames.SendFromDeviceAsync(new SetMuteDeviceMessage(new DeviceAudioStreamId("stream-1", AgentId), true));
-        var message = await harness.AgentRegistry.ReadAsync<SetMuteMessage>(AgentId);
+        var message = await harness.AgentRegistry.ReadAsync<SetMuteAgentMessage>(AgentId);
 
         Assert.Multiple(() =>
         {
@@ -102,7 +102,7 @@ public class BridgeDeviceIntegrationTests
         await harness.StartDeviceMessagePumpAsync();
 
         await harness.Frames.SendFromDeviceAsync(new GetIconDeviceMessage("firefox", AgentId, 123));
-        var message = await harness.AgentRegistry.ReadAsync<GetIconMessage>(AgentId);
+        var message = await harness.AgentRegistry.ReadAsync<GetIconAgentMessage>(AgentId);
 
         Assert.That(message.Source, Is.EqualTo("firefox"));
     }
@@ -136,7 +136,6 @@ public class BridgeDeviceIntegrationTests
         private readonly CancellationTokenSource _cts = new();
         private AsyncServiceScope? _messageScope;
         private Task? _messagePump;
-        private AudioStreamSnapshotService? _snapshotService;
 
         private BridgeHarness(ServiceProvider services, FakeFrameChannel frames, RecordingAgentRegistry agentRegistry)
         {
@@ -178,7 +177,7 @@ public class BridgeDeviceIntegrationTests
             services.AddSingleton<IAudioStreamRepository, AudioStreamRepository>();
             services.AddSingleton<IAudioStreamIconCache, AudioStreamIconCache>();
             services.AddSingleton<IAgentRegistry>(agents);
-            services.AddSingleton<AudioStreamSnapshotService>();
+            services.AddSingleton<AudioStreamIncrementalSnapshotHandler>();
 
             return new BridgeHarness(services.BuildServiceProvider(), frames, agents);
         }
@@ -191,17 +190,8 @@ public class BridgeDeviceIntegrationTests
             return Task.CompletedTask;
         }
 
-        public async Task StartSnapshotServiceAsync()
-        {
-            _snapshotService = Services.GetRequiredService<AudioStreamSnapshotService>();
-            await _snapshotService.StartAsync(_cts.Token);
-        }
-
         public async ValueTask DisposeAsync()
         {
-            if (_snapshotService != null)
-                await _snapshotService.StopAsync(CancellationToken.None);
-
             await _cts.CancelAsync();
 
             if (_messagePump != null)

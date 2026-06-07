@@ -2,5 +2,5 @@ using Mediator;
 
 namespace ControlPanel.Protocol;
 
-public record GetIconMessage(string Source)
+public record GetIconAgentMessage(string Source)
     : AgentMessage(AgentMessageType.GetIcon), INotification;
