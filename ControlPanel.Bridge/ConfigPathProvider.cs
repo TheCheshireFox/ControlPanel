@@ -9,5 +9,8 @@ public static class ConfigPathProvider
     static ConfigPathProvider()
     {
         Path = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), AppFolder, FileName);
+        
+        if (!File.Exists(Path))
+            File.WriteAllText(Path, "{}");
     }
 }

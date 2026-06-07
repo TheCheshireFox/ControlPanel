@@ -53,7 +53,7 @@ static constexpr char TAG[] = "main";
 #define PIN_TOUCH_RST     GPIO_NUM_16 // shared with lcd RST
 #define PIN_TOUCH_INT     GPIO_NUM_10
 
-#define BL_TIMER_LONG  uint64_t(3600 * 1000)
+#define BL_TIMER_LONG  uint64_t(43200 * 1000) // 12h
 #define BL_TIMER_SHORT uint64_t(30 * 1000)
 
 static std::optional<cst328_driver_t> cst328_driver;
