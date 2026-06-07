@@ -14,7 +14,7 @@
 template<typename T>
 const T& get_delta(const std::vector<display_delta_t>& deltas, std::size_t index)
 {
-    TEST_ASSERT_LESS_THAN(index, deltas.size());
+    TEST_ASSERT_LESS_THAN(deltas.size(), index);
 
     auto delta = std::get_if<T>(&deltas[index]);
     TEST_ASSERT_NOT_NULL(delta);
@@ -168,7 +168,7 @@ TEST_CASE("update_icon_applies_to_matching_items_and_reuses_cache", "[volume_dis
     TEST_ASSERT_EQUAL(2, set_icon.icon.w);
     TEST_ASSERT_EQUAL(2, set_icon.icon.h);
     TEST_ASSERT_EQUAL(icon.size(), set_icon.icon.data.size());
-    TEST_ASSERT_EQUAL_INT_ARRAY(icon.data(), set_icon.icon.data.data(), icon.size());
+    TEST_ASSERT_EQUAL_MEMORY(icon.data(), set_icon.icon.data.data(), icon.size());
 
     auto cached_deltas = model.refresh(
         std::vector{make_stream("stream-2", "agent-1", "app.exe", "App 2", 0.2f, false, 100)},
@@ -179,7 +179,7 @@ TEST_CASE("update_icon_applies_to_matching_items_and_reuses_cache", "[volume_dis
 
     const auto& cached_icon = get_delta<display_set_item_icon_t>(cached_deltas, 1);
     TEST_ASSERT_EQUAL_STRING("stream-2", cached_icon.id.id.c_str());
-    TEST_ASSERT_EQUAL_INT_ARRAY(icon.data(), cached_icon.icon.data.data(), icon.size());
+    TEST_ASSERT_EQUAL_MEMORY(icon.data(), cached_icon.icon.data.data(), icon.size());
 }
 
 TEST_CASE("icon_hash_change_requests_or_sets_icon_for_existing_item", "[volume_display]")
@@ -212,7 +212,7 @@ TEST_CASE("icon_hash_change_requests_or_sets_icon_for_existing_item", "[volume_d
 
     const auto& set_icon = get_delta<display_set_item_icon_t>(set_icon_deltas, 0);
     TEST_ASSERT_EQUAL_STRING("stream-1", set_icon.id.id.c_str());
-    TEST_ASSERT_EQUAL_INT_ARRAY(icon.data(), set_icon.icon.data.data(), icon.size());
+    TEST_ASSERT_EQUAL_MEMORY(icon.data(), set_icon.icon.data.data(), icon.size());
 }
 
 TEST_CASE("icon_cache_evicts_least_recently_used_icon", "[volume_display]")

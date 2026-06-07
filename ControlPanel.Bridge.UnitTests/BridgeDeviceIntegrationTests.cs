@@ -69,7 +69,7 @@ public class BridgeDeviceIntegrationTests
         await using var harness = BridgeHarness.Create();
         await harness.StartDeviceMessagePumpAsync();
 
-        await harness.Frames.SendFromDeviceAsync(new SetVolumeDeviceMessage(new DeviceAudioStreamId("stream-1", AgentId), 0.5));
+        await harness.Frames.SendFromDeviceAsync(new SetVolumeDeviceMessage(new DeviceAudioStreamId("stream-1", AgentId), 0.5f));
         var message = await harness.AgentRegistry.ReadAsync<SetVolumeMessage>(AgentId);
 
         Assert.Multiple(() =>

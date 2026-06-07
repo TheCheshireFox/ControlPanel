@@ -31,7 +31,7 @@ public class DeviceMessageWireContractTests
             Assert.That(setVolume.Type, Is.EqualTo(MessageType.SetVolume));
             Assert.That(setVolume.Id.Id, Is.EqualTo("stream-1"));
             Assert.That(setVolume.Id.AgentId, Is.EqualTo("agent-a"));
-            Assert.That(setVolume.Volume, Is.EqualTo(0.42));
+            Assert.That(setVolume.Volume, Is.EqualTo(0.42f));
         });
     }
 

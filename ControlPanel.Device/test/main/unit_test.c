@@ -3,5 +3,4 @@
 void app_main()
 {
     unity_run_all_tests();
-    unity_run_menu();
 }
